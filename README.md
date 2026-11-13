@@ -77,10 +77,10 @@ Do them in order. Steps 1–3 are on the monitor (from a Linux PC on your LAN); 
 
 ## Credits & licence
 
-- Original code (bridge, audio helper, relay, card, Lua patch tool, Home Assistant config) is released
-  under the **MIT licence** — see [LICENSE](LICENSE).
+- **Free and unencumbered — released into the public domain** ([The Unlicense](LICENSE)). Use it, change it,
+  ship it, sell it; no permission or attribution required.
 - The LAN video protocol is reimplemented from **[quii‑helper](https://github.com/xaer981/quii-helper)**
-  (MIT).
+  (MIT); that upstream notice is kept in [LICENSE](LICENSE).
 - Audio‑path groundwork draws on the **WiBox** community
   ([segator/wibox-media](https://github.com/segator/wibox-media), GPL‑3.0, and duhow/wibox,
   Conclusio/wibox-audio) for a sibling Goke intercom.
