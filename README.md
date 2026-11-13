@@ -75,17 +75,47 @@ Do them in order. Steps 1–3 are on the monitor (from a Linux PC on your LAN); 
 | `home-assistant/vimar_doorbell.yaml` | HA package: notification, call ownership, monitor priority |
 | `home-assistant/door_view.yaml` | the dashboard view that holds the card |
 
-## Credits & licence
+## Licence
 
-- **Free and unencumbered — released into the public domain** ([The Unlicense](LICENSE)). Use it, change it,
-  ship it, sell it; no permission or attribution required.
-- The LAN video protocol is reimplemented from **[quii‑helper](https://github.com/xaer981/quii-helper)**
-  (MIT); that upstream notice is kept in [LICENSE](LICENSE).
-- Audio‑path groundwork draws on the **WiBox** community
-  ([segator/wibox-media](https://github.com/segator/wibox-media), GPL‑3.0, and duhow/wibox,
-  Conclusio/wibox-audio) for a sibling Goke intercom.
-- The Lua patch tool edits two functions of the vendor's own UI file on *your* device; no vendor code is
-  distributed here.
+**Free and unencumbered — released into the public domain** ([The Unlicense](LICENSE)). Use it, change it,
+ship it, sell it; no permission or attribution required. The one third‑party notice that must stay (for the
+quii‑helper‑derived relay) is kept in [LICENSE](LICENSE).
+
+The Lua patch tool edits two functions of the vendor's own UI file on *your* device; no vendor code is
+distributed in this repository.
+
+## Credits — projects this work builds on
+
+This project would not exist without the following. Full credit and thanks to their authors.
+
+**Protocol & prior art** (what the relay and the approach are based on)
+
+- [xaer981/quii‑helper](https://github.com/xaer981/quii-helper) — the QUVII LAN protocol and the one‑time
+  cloud key bootstrap; `home-assistant/quii_lan.py` is a reimplementation of its LAN path (MIT).
+- [fariborz0015/quii‑lan‑client](https://github.com/fariborz0015/quii-lan-client) — second reference for the
+  QUVII framing and the listen/talk audio path (MIT).
+- [MDalprato/VimarViewHomeKit](https://github.com/MDalprato/VimarViewHomeKit) — local‑video prior art on the
+  sibling Vimar K42957 kit.
+- [segator/wibox-media](https://github.com/segator/wibox-media) (GPL‑3.0), building on
+  [duhow/wibox](https://github.com/duhow/wibox) and [Conclusio/wibox-audio](https://github.com/Conclusio/wibox-audio)
+  — audio‑path groundwork (`gadi/adi_audio`, RTSP) for a sibling Goke GK710x intercom.
+- [syntesys87/c300x-controller](https://github.com/syntesys87/c300x-controller) — the architecture model: a
+  rooted indoor monitor serving its media locally.
+
+**Software this project builds on or requires**
+
+- [AlexxIT/go2rtc](https://github.com/AlexxIT/go2rtc) — runs the video relay and the WebRTC transport.
+- [AlexxIT/WebRTC](https://github.com/AlexxIT/WebRTC) — the `custom:webrtc-camera` element the door card uses (HACS).
+- [Dropbear SSH](https://matt.ucc.asn.au/dropbear/dropbear.html) — the small SSH server cross‑built for root access.
+- [BearSSL](https://bearssl.org/) — the TLS stack linked into the MQTT bridge.
+- [Home Assistant](https://www.home-assistant.io/) and its MQTT, Generic Camera and companion‑app components.
+
+**Same hardware / related Home Assistant work** (reference, not required)
+
+- [dpeddi/qualvision-tools](https://github.com/dpeddi/qualvision-tools) — earlier exploration of the Qualvision CGI.
+- [ha-vimar/ha-vimar-intercom](https://github.com/ha-vimar/ha-vimar-intercom) — the closest existing HA project for Vimar.
+- [fdaneluzzi/homeassistant-allo-wt7](https://github.com/fdaneluzzi/homeassistant-allo-wt7) — HA integration for a sibling Qualvision‑OEM monitor.
+- [OpenIPC](https://openipc.org/cameras/vendors/goke) — Goke GK7101/7102 SoC support status.
 
 Not affiliated with or endorsed by Vimar or Qualvision. “Vimar”, “VIEW” and “vEye” are trademarks of their
 respective owners, used here only to identify the hardware.
