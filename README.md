@@ -77,9 +77,9 @@ Do them in order. Steps 1–3 are on the monitor (from a Linux PC on your LAN); 
 
 ## Licence
 
-**Free for non‑commercial use** — Creative Commons **BY‑NC‑SA 4.0** ([LICENSE](LICENSE)). You may use,
-study, modify and share it freely; you may **not sell it** or any work based on it, and shared versions must
-stay under the same free terms. See [LICENSE](LICENSE) for the quii‑helper (MIT) third‑party notice.
+**Free and unencumbered — released into the public domain** ([The Unlicense](LICENSE)). Use it, change it,
+ship it, sell it; no permission or attribution required. The one third‑party notice that must stay (for the
+quii‑helper‑derived relay) is kept in [LICENSE](LICENSE).
 
 The Lua patch tool edits two functions of the vendor's own UI file on *your* device; no vendor code is
 distributed in this repository.

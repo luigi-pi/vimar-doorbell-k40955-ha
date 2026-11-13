@@ -1,34 +1,26 @@
-Vimar Doorbell K40955 — Home Assistant integration
-Copyright (c) 2026 luigi-pi and contributors
+This is free and unencumbered software released into the public domain.
 
-This work is licensed under the
-Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License
-(CC BY-NC-SA 4.0).
+Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
+software, either in source code form or as a compiled binary, for any purpose,
+commercial or non-commercial, and by any means.
 
-Full legal text:  https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
-Summary:          https://creativecommons.org/licenses/by-nc-sa/4.0/
+In jurisdictions that recognize copyright laws, the author or authors of this
+software dedicate any and all copyright interest in the software to the public
+domain. We make this dedication for the benefit of the public at large and to
+the detriment of our heirs and successors. We intend this dedication to be an
+overt act of relinquishment in perpetuity of all present and future rights to
+this software under copyright law.
 
-In plain words — you are free to:
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-  * USE it, privately or in your home, for any non-commercial purpose;
-  * STUDY and MODIFY it;
-  * SHARE it and your modified versions.
-
-Under these conditions:
-
-  * NonCommercial — you may NOT sell it or use it (or anything based on it) for
-    commercial advantage or monetary compensation.
-  * ShareAlike — if you share a modified version, you must license it under these
-    same terms, so it stays free for everyone.
-  * Attribution — keep this notice and credit the original project.
-
-THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
-THE AUTHORS ARE NOT LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING
-FROM ITS USE. Use on your own hardware, at your own risk.
+For more information, please refer to <https://unlicense.org>
 
 ---
 
-Third-party notice:
-home-assistant/quii_lan.py reimplements the LAN protocol of quii-helper
-(https://github.com/xaer981/quii-helper), which is MIT-licensed. Credit to its
-author.
+Note: home-assistant/quii_lan.py reimplements the LAN protocol of quii-helper
+(https://github.com/xaer981/quii-helper), which is MIT-licensed.
