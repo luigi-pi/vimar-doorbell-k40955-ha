@@ -1,0 +1,24 @@
+# Secrets and device-specific material — never commit
+.env
+*.pem
+bridge.conf
+media.conf
+stream_credentials.json
+base.lua
+base.lua.*
+authorized_keys
+id_ed25519*
+
+# Firmware / captures
+*.bin
+*.img
+*.upf
+*.pcap
+*.apk
+
+# Build output
+build/
+dist/
+*.o
+*.a
+__pycache__/
