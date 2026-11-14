@@ -1,0 +1,71 @@
+# Builds the three programs that run on the monitor and packs the complete kit as one zip file.
+# - every push / pull request: the zip is attached to the workflow run ("Artifacts")
+# - a tag like v1.0.0:         the zip is published on the Releases page
+name: Build the kit
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the ARM cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabi libc6-dev-armel-cross make curl bzip2 qemu-user zip
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Smoke test on an emulated ARM1176 CPU (the monitor's CPU)
+        run: |
+          set -x
+          qemu-arm -cpu arm1176 dist/dropbearmulti dropbear -V
+          qemu-arm -cpu arm1176 dist/dropbearmulti dropbearkey -t ed25519 -f /tmp/hostkey
+          (qemu-arm -cpu arm1176 dist/vimarbridge 2>&1 || true) | grep usage
+          (qemu-arm -cpu arm1176 dist/vimaraudio 2>&1 || true) | grep usage
+          python3 -m py_compile tools/vimar.py on-device/keylock/make_keylock.py on-device/lua-patch/make_patch.py
+          sh -n on-device/ssh/ram-ssh.sh && sh -n on-device/ssh/make-permanent.sh && sh -n on-device/ssh/start.sh && sh -n on-device/boot.sh
+
+      - name: Pack the kit (all files of the repository + dist/)
+        run: |
+          mkdir -p out/vimar-k40955-kit
+          git archive HEAD | tar -x -C out/vimar-k40955-kit
+          cp -r dist out/vimar-k40955-kit/
+          cd out
+          zip -qr vimar-k40955-kit.zip vimar-k40955-kit
+          sha256sum vimar-k40955-kit.zip > vimar-k40955-kit.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vimar-k40955-kit
+          path: |
+            out/vimar-k40955-kit.zip
+            out/vimar-k40955-kit.zip.sha256
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vimar-k40955-kit
+      - name: Publish on the Releases page
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" vimar-k40955-kit.zip vimar-k40955-kit.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
