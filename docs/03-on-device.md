@@ -1,134 +1,139 @@
-# 3 — On‑device components
+# 3 — Install the on‑device components
 
-Three small programs run on the monitor and start at boot:
+Four small things are added to the monitor and start at every power‑on:
 
 | Component | Job |
 |---|---|
-| **vimarbridge** | relays the door‑bus (UART) to/from MQTT: ring, gate, answer, hang‑up, call‑state sensor |
-| **vimaraudio** | streams the door microphone and speaker over RTSP (listen + talk‑back) |
-| **base.lua patch** | lets a phone watch the camera *while the monitor is ringing*, without the monitor “answering for the cloud” |
+| **vimarbridge** | passes the door bus to Home Assistant over MQTT: ring, gate, answer, hang‑up, call state |
+| **vimaraudio** | carries the door microphone and speaker (listen + talk‑back) |
+| **Lua patch** | lets a phone watch the camera *while the monitor is ringing*, without the monitor treating the viewer as an answer |
+| **Key lock** | stops the monitor from changing its video key every 7 days (without it the video in Home Assistant goes dark after a week) |
 
-All three are started by `boot.sh`, which is launched from the SSH hook you added in step 1. Nothing is
-written to the firmware; everything lives on the writable data partition (`/mntfs`) and the Lua patch is a
-RAM bind‑mount undone by a reboot.
+Nothing in the monitor's firmware is changed. Everything is stored on its data partition
+(`/mntfs/vimarbridge`); the Lua patch and the key lock work on **copies** of two files of your own
+monitor and are undone by a switch file or by removing the folder.
 
-You build on the Linux PC with the ARM cross‑compiler from step 1, then copy the result to the monitor.
+**You need:** the login from [step 2](02-root-and-backup.md) (`ssh root@<MONITOR_IP>` works), the kit
+folder with `dist`, and Home Assistant with an MQTT broker.
 
+## 3.1 Prepare MQTT in Home Assistant
+
+The bridge talks to the MQTT broker of your Home Assistant over an encrypted connection (port 8883).
+
+1. **Broker.** If you do not have one: *Settings → Add‑ons → Add‑on store → Mosquitto broker →
+   Install → Start*, then accept the **MQTT** integration that *Settings → Devices & services* offers.
+2. **A user for the doorbell.** *Settings → People → Users → Add user*, for example `vimar`, with a
+   password of its own. Note both.
+3. **A certificate for the broker.** The encrypted port only works if the broker has a certificate.
+   The bridge remembers ("pins") exactly this certificate, so it should not change. The simplest way
+   is a certificate of its own, valid for 10 years. In the **Terminal & SSH** add‑on run:
+
+   ```sh
+   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=mqtt" -keyout /ssl/mqtt-key.pem -out /ssl/mqtt-cert.pem
+   ```
+
+   Then in the Mosquitto add‑on, tab *Configuration*, set `certfile` to `mqtt-cert.pem` and `keyfile`
+   to `mqtt-key.pem`, save and restart the add‑on.
+
+   > Already using the broker's port 8883 with a Let's Encrypt certificate? That works too, but such
+   > certificates are replaced every few weeks, usually with a new key. Each time the ring and the gate
+   > stop working until you repeat [3.3](#33-install) (delete `broker.pem` first).
+
+## 3.2 Your settings
+
+In the kit folder, copy the example and fill in **three** values: the address of Home Assistant and
+the MQTT user and password from 3.1.
+
+**Windows**
+```
+copy on-device\bridge.conf.example bridge.conf
+notepad bridge.conf
+```
+**Linux**
 ```sh
-sudo apt install -y gcc-arm-linux-gnueabi
-F="-O1 -march=armv6 -marm -mfloat-abi=soft -fno-strict-aliasing -fno-strict-overflow -mno-unaligned-access -static"
+cp on-device/bridge.conf.example bridge.conf
+nano bridge.conf
 ```
 
-> These flags are mandatory (same as dropbear in step 1). `-fno-strict-aliasing` in particular is required
-> or the TLS/crypto code miscompiles on this GCC/CPU combination.
+`host=` must be an address made of numbers (like `192.168.1.10`), not a name.
+`bridge.conf` contains your MQTT password — keep it private.
 
-Build the two binaries into a staging folder `dist/` (so the installer finds them next to `boot.sh`):
+## 3.3 Install
 
+**Windows**
+```
+python tools\vimar.py install <MONITOR_IP>
+```
+**Linux**
 ```sh
-cd on-device
-mkdir -p dist
+python3 tools/vimar.py install <MONITOR_IP>
 ```
 
-## 3.1 Build vimaraudio
+The command tells you what it does:
 
-```sh
-arm-linux-gnueabi-gcc $F -Wall -o dist/vimaraudio vimaraudio/src/vimaraudio.c
+1. checks your settings and fetches the broker's certificate (saved as `broker.pem`);
+2. copies the Lua file and the main program **from your monitor** into the folder `work`, and patches
+   the copies. Both tools only accept the files of firmware **V401R001B002**; with any other firmware
+   they are skipped with a clear message and the rest is still installed;
+3. copies everything to `/mntfs/vimarbridge` on the monitor, checking each file after the copy;
+4. adds the start line to `/mntfs/dropbear/start.sh`.
+
+Then restart the monitor (the intercom is unavailable for about three minutes):
+
 ```
-
-## 3.2 Build vimarbridge (needs BearSSL 0.6)
-
-The bridge talks to your MQTT broker over TLS, pinning the broker's own certificate (no CA, no clock).
-
-```sh
-# BearSSL 0.6:  https://bearssl.org/bearssl-0.6.tar.gz
-B=~/bearssl-0.6
-mkdir -p "$B/build/obj"
-( cd "$B" && for f in $(find src -name '*.c'); do \
-      arm-linux-gnueabi-gcc $F -Iinc -Isrc -c "$f" -o "build/obj/$(echo $f | tr / _).o"; done \
-  && arm-linux-gnueabi-ar rcs build/libbearssl.a build/obj/*.o )
-
-arm-linux-gnueabi-gcc $F -I"$B/inc" -o dist/vimarbridge vimarbridge.c "$B/build/libbearssl.a"
-file dist/vimarbridge    # must say: ARM, statically linked
-```
-
-## 3.3 Patch the monitor's UI (base.lua)
-
-Copy the UI file **from your own monitor** and patch it on the PC (the patcher checks it matches firmware
-**V401R001B002** and refuses anything else):
-
-```sh
-scp root@<MONITOR_IP>:/usr/local/app/luaprj/src/base/base.lua .
-python3 on-device/lua-patch/make_patch.py base.lua base.lua.patched
-```
-
-The patch changes two UI functions so the monitor keeps ringing (and showing its own picture) while a phone
-watches, instead of treating the viewer as a cloud answer.
-
-## 3.4 Configure the MQTT link
-
-The bridge needs your MQTT broker. Create `bridge.conf` and export the broker's TLS certificate as
-`broker.pem`:
-
-```ini
-# bridge.conf   (key=value)
-host=<HA_IP>
-port=8883
-user=<MQTT_USER>
-pass=<MQTT_PASSWORD>
-cert=/mntfs/vimarbridge/broker.pem
-base=vimar/k40955
-node=vimar_k40955
-```
-
-```sh
-# broker.pem = the broker's server certificate (the one it presents on 8883)
-openssl s_client -connect <HA_IP>:8883 -servername <HA_IP> </dev/null 2>/dev/null \
-  | openssl x509 > broker.pem
-```
-
-> Use a dedicated MQTT user for the doorbell. Do not commit `bridge.conf` or `broker.pem` — they hold your
-> broker password and are device‑specific.
-
-## 3.5 Install and start at boot
-
-Put the config, certificate and patched Lua on the monitor, then run the installer (it copies the bridge,
-the audio helper and `boot.sh`, and records the HA address for the audio stream):
-
-```sh
-cp boot.sh dist/
-ssh root@<MONITOR_IP> 'mkdir -p /mntfs/vimarbridge/lua'
-scp bridge.conf broker.pem root@<MONITOR_IP>:/mntfs/vimarbridge/
-scp base.lua.patched root@<MONITOR_IP>:/mntfs/vimarbridge/lua/base.lua
-
-VIMAR_SSH=root@<MONITOR_IP> ./install.sh install dist <HA_IP>
-```
-
-Add one line to the SSH hook so `boot.sh` runs at every boot (right after dropbear), then reboot:
-
-```sh
-ssh root@<MONITOR_IP> "grep -q vimarbridge/boot.sh /mntfs/dropbear/start.sh || \
-  echo '[ -x /mntfs/vimarbridge/boot.sh ] && /mntfs/vimarbridge/boot.sh &' >> /mntfs/dropbear/start.sh"
 ssh root@<MONITOR_IP> reboot
 ```
 
-## 3.6 Verify (after ~2 minutes)
+## 3.4 Check
 
+After about three minutes:
+
+**Windows**
+```
+python tools\vimar.py status <MONITOR_IP>
+```
+**Linux**
 ```sh
-ssh root@<MONITOR_IP> 'grep -E "Lua|OK:|vimaraudio" /tmp/vb/boot.log; pidof vimarbridge vimaraudio mainapp'
+python3 tools/vimar.py status <MONITOR_IP>
 ```
 
-You want to see `Lua patch applied`, `OK: mainapp behind the bridge`, `vimaraudio started`, and three
-process IDs. Press the doorbell: the monitor rings normally and (once Home Assistant is set up in step 4)
-an MQTT `ring` event fires.
+You want to see, in the boot log, `Lua patch applied`, `OK: mainapp behind the bridge` and
+`vimaraudio started`; three process numbers under *running*; and
+`mainapp program: /mntfs/vimarbridge/app/mainapp` (the key lock).
 
-## Switches and rollback
+Press the doorbell: the monitor rings as always. In Home Assistant (*Settings → Devices & services →
+MQTT*) a new device with the ring event, the call state and the gate button has appeared.
 
-| | |
+Continue with [step 4](04-home-assistant.md).
+
+## Switching parts off, and undoing
+
+Each line is one command on the PC, followed by `ssh root@<MONITOR_IP> reboot`.
+
+| To do this | run |
 |---|---|
-| Disable everything at next boot | `touch /mntfs/vimarbridge/disable` |
-| Disable only the Lua patch | `touch /mntfs/vimarbridge/disable-lua` |
-| Disable only the audio helper | `touch /mntfs/vimarbridge/disable-audio` |
-| Roll back the binaries | `./install.sh rollback` (restores the previous `*.prev`) |
+| Switch **everything** of this step off (monitor behaves as delivered) | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable"` |
+| Switch off only the Lua patch | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable-lua"` |
+| Switch off only the audio helper | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable-audio"` |
+| Switch off only the key lock | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable-app"` |
+| Switch a part on again | the same line with `rm` instead of `touch` |
+| Remove this step completely | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable"`, reboot, then `ssh root@<MONITOR_IP> "rm -rf /mntfs/vimarbridge"` |
 
-If the bridge ever dies, `boot.sh` restores the stock UART and restarts the monitor app, so the intercom
-keeps working on its own.
+The installer keeps the previous version of each program next to the new one (`*.prev`).
+
+If the bridge ever stops, `boot.sh` gives the door bus back to the monitor's own program and restarts
+it, so the intercom keeps working on its own. If the key‑lock copy of the main program does not
+start, `boot.sh` falls back to the original by itself.
+
+## Changing something later
+
+Changed the MQTT password, the broker's certificate or the address of Home Assistant? Edit
+`bridge.conf` (and delete `broker.pem` if the certificate changed), run the install command of 3.3
+again and reboot the monitor.
+
+## For developers
+
+`on-device/install.sh` is the Linux shell equivalent of `vimar.py install` (with `verify` and
+`rollback`). `ramtest.sh`, `swap_vb.sh` and `lua-patch/lua_b1.sh` are RAM‑only test tools used during
+development; they are not needed for an installation. The programs in `dist` are built by
+[`build.sh`](building.md).

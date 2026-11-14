@@ -8,7 +8,7 @@
 #   ./ramtest.sh status            processes, audio.state, open audio fds, AO/AI lines from the logs
 #   ./ramtest.sh watch             follow bridge + audio logs (Ctrl-C to stop)
 #   ./ramtest.sh logs <dir>        fetch all logs into <dir>
-#   ./ramtest.sh mainapp keylock|hq [dir]  restart only mainapp with <dir>/mainapp built by tools/hq/make_hq.py
+#   ./ramtest.sh mainapp keylock|hq [dir]  restart only mainapp with <dir>/mainapp built by keylock/make_keylock.py
 #                                   (hq also uses <dir>/goke_prm_hq.ini; T33/T34)
 #   ./ramtest.sh mainapp stock     restart only mainapp stock (or: undo = reboot)
 #   ./ramtest.sh undo              reboot the monitor
@@ -61,7 +61,7 @@ mainapp)
     # output goes to /dev/console as in the stock start (mainapp needs a tty)
     mode=${2:?keylock|hq|stock}; d=${3:-.}
     if [ "$mode" = keylock ] || [ "$mode" = hq ]; then
-        [ -f "$d/mainapp" ] || { echo "missing $d/mainapp (build it with tools/hq/make_hq.py $mode ...)"; exit 1; }
+        [ -f "$d/mainapp" ] || { echo "missing $d/mainapp (build it with keylock/make_keylock.py)"; exit 1; }
         ssh $H 'pidof vimarbridge >/dev/null && [ -L /dev/ttySGK1 ]' || { echo "bridge not running"; exit 1; }
         # keep the file name "mainapp": pidof/kill (here and in boot.sh) match the process name
         ssh $H "mkdir -p /tmp/vb/hq && rm -f /tmp/vb/mainapp.hq && cat > /tmp/vb/hq/mainapp.new && chmod 755 /tmp/vb/hq/mainapp.new && mv /tmp/vb/hq/mainapp.new /tmp/vb/hq/mainapp" < "$d/mainapp" || exit 1

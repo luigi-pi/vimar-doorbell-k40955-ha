@@ -1,5 +1,5 @@
 # Door view with the vimar-door-card (T43, in use since T49). Paste with Edit view -> Edit in YAML.
-# Card file, install and device tests: card/README.md. Package: vimar_doorbell.yaml (notification opens this
+# Install: docs/04-home-assistant.md (4.6). Package: vimar_doorbell.yaml (notification opens this
 # view: its clickAction path must match this view's path, with the dashboard's URL prefix).
 # Opening the view starts the video in idle / viewing (autostart), which occupies the indoor monitor ("viewing"):
 # do not make it the dashboard's first view. With the B1 Lua patch (T55) the video also runs during a ring.

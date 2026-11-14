@@ -1,11 +1,11 @@
-# Vimar K40955 doorbell in Home Assistant with the door card (custom:vimar-door-card, tools/ha/card, T49).
+# Vimar K40955 doorbell in Home Assistant with the door card (custom:vimar-door-card).
 # One Door view with the card does everything: video, Answer, Hang up, slide to open the gate, "Answered by …".
 # The card reacts to sensor.vimar_k40955_call_state and input_text.vimar_call_owner; no page reloads, no
 # navigation (the old two-view setup with input_buttons and command_webview is replaced, see git history T36-T42).
 # Talk-back needs HTTPS: the phone's WebView only gives the microphone to secure pages. Set the companion app's
 # internal URL to the HTTPS address as well (T36).
 #
-# Requirements (docs/09-ha-call-flow-target.md): first to Answer owns the call (R3); only the owner's Hang up ends
+# Rules: first to Answer owns the call (R3); only the owner's Hang up ends
 # it (R4, in the card); the indoor monitor keeps priority (G6).
 #
 # Fill in before use:
@@ -22,7 +22,7 @@
 #   /lovelace/door -> path of the Door view (door_view.yaml). If the view is not on the default dashboard, replace
 #                     /lovelace/ by the dashboard's URL path (e.g. /dashboard-dashboard/), as shown in the address bar
 # 1) PACKAGE: copy to /config/packages/vimar_doorbell.yaml (packages enabled in configuration.yaml), restart HA.
-# 2) CARD: tools/ha/card/README.md (copy vimar-door-card.js to /config/www/, add it as a dashboard resource).
+# 2) CARD: copy vimar-door-card.js to /config/www/ and add it as a dashboard resource (docs/04-home-assistant.md, 4.6).
 # 3) VIEW: door_view.yaml (Edit view -> Edit in YAML, paste); delete the old Door / Door live views.
 
 # ============================== PACKAGE ===================================================================
@@ -72,7 +72,7 @@ script:
 
 automation:
   # R1 (first part): fast notification to all phones, no buttons; tapping it opens the Door view with the card.
-  # The picture follows later (docs/09 step B).
+  # The picture follows later.
   - alias: Vimar - doorbell ring notification
     id: vimar_ring_notification
     mode: single

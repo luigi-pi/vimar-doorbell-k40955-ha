@@ -6,7 +6,7 @@
 #   ./install.sh verify                  after a reboot: boot.log, processes, audio log tail
 #   ./install.sh rollback                restore *.prev, remove vimaraudio + media.conf (takes effect at next boot)
 #   ./install.sh audio-off|audio-on      disable/enable only the media helper at next boot
-#   ./install.sh app keylock|hq <dir>    install a patched mainapp (tools/hq/make_hq.py output) in /mntfs/vimarbridge/app
+#   ./install.sh app keylock|hq <dir>    install a patched mainapp (<dir>/mainapp, e.g. from keylock/make_keylock.py) in /mntfs/vimarbridge/app
 #   ./install.sh app stock               remove it (stock mainapp from next boot); boot.sh falls back to stock by itself
 #                                        if the patched build does not start
 H=${VIMAR_SSH:-vimar}
