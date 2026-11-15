@@ -35,6 +35,13 @@ input_text:
   vimar_call_owner:
     name: Vimar - user who answered the HA call
     max: 64
+  vimar_last_ring:
+    name: Vimar - time of the last ring (DDMMYY_hhmm, also the picture's file name)
+    max: 16
+
+# Pictures of the callers are kept for 3 months in /config/www/vimar/ (see the clean-up automation below).
+shell_command:
+  vimar_clean_pictures: "find /config/www/vimar -name '*.jpg' -mtime +90 -delete"
 
 script:
   vimar_notify_clear:
@@ -82,6 +89,11 @@ automation:
       - trigger: mqtt
         topic: vimar/k40955/event          # one message per ring from the bridge
     actions:
+      - variables:
+          stamp: "{{ now().strftime('%d%m%y_%H%M') }}"     # DDMMYY_hhmm of this ring
+      - action: input_text.set_value
+        target: {entity_id: input_text.vimar_last_ring}
+        data: {value: "{{ stamp }}"}
       # 1) instant text-only alert, tapping it opens the Door view (card); Answer is in the card
       - repeat:
           for_each: "{{ phones.values() | map(attribute='notify') | list }}"
@@ -98,15 +110,14 @@ automation:
                   ttl: 0
                   timeout: 60                    # removed after 60 s if nobody reacts
                   clickAction: /lovelace/door
-      # 2) freeze the caller while the outdoor camera is still live, so the picture survives the ring
-      #    (the live frame is gone once the ring ends - this same file feeds "No one answered" below).
+      # 2) save the caller's picture while the outdoor camera is still live, as DDMMYY_hhmm.jpg
+      #    (the live frame is gone once the ring ends - the same file feeds "not answered" below).
       #    Needs the folder /config/www/vimar/ and /config/www in allowlist_external_dirs (see docs/04 4.4).
       - action: camera.snapshot
         continue_on_error: true
         target: {entity_id: camera.vimar_door}
-        data: {filename: /config/www/vimar/ring.jpg}
-      # 3) the same notification with the caller's picture (alert_once = no second sound). The ?<time>
-      #    makes the phone re-fetch the new frame instead of showing a cached one (R1, T56).
+        data: {filename: "/config/www/vimar/{{ stamp }}.jpg"}
+      # 3) the same notification with the caller's picture (alert_once = no second sound, R1, T56)
       - repeat:
           for_each: "{{ phones.values() | map(attribute='notify') | list }}"
           sequence:
@@ -122,7 +133,7 @@ automation:
                   ttl: 0
                   timeout: 60
                   alert_once: true
-                  image: "/local/vimar/ring.jpg?{{ now().timestamp() | int }}"
+                  image: "/local/vimar/{{ stamp }}.jpg"
                   clickAction: /lovelace/door
 
   # Somebody answered (a phone or the indoor monitor): the ring notification goes away on every phone.
@@ -137,9 +148,9 @@ automation:
 
   # R1 (no answer): the ring ended and nobody picked up on the monitor, in HA or in the app
   # (an answer goes ringing -> answered_*, never ringing -> idle). Replace the ring notification, in
-  # place and with the same frozen picture, by a persistent "No one answered" (stays until dismissed
-  # or the next ring). A later answer of a new ring clears it (vimar_notify_clear, same tag).
-  - alias: Vimar - "no one answered" notification
+  # place and with the same saved picture, by a persistent "hh:mm : not answered" with the time of the
+  # ring (stays until dismissed or the next ring). A later answer of a new ring clears it (same tag).
+  - alias: Vimar - "not answered" notification
     id: vimar_notify_missed
     mode: single
     max_exceeded: silent
@@ -150,20 +161,22 @@ automation:
         from: ringing
         to: idle
     actions:
+      - variables:
+          stamp: "{{ states('input_text.vimar_last_ring') }}"      # DDMMYY_hhmm of that ring
       - repeat:
           for_each: "{{ phones.values() | map(attribute='notify') | list }}"
           sequence:
             - action: "notify.{{ repeat.item }}"
               data:
                 title: Doorbell
-                message: No one answered
+                message: "{{ stamp[7:9] }}:{{ stamp[9:11] }} : not answered"
                 data:
                   tag: vimar_door                # replaces the ring notification, keeps its place
                   channel: doorbell
                   importance: default            # quiet update, no buzz
                   alert_once: true               # no new sound
                   sticky: true                   # stays after it is tapped
-                  image: "/local/vimar/ring.jpg?{{ now().timestamp() | int }}"
+                  image: "/local/vimar/{{ stamp }}.jpg"
                   clickAction: /lovelace/door
                   # no "timeout": the notification is not auto-removed. Use persistent: true to also
                   # stop it being swiped away.
@@ -228,3 +241,12 @@ automation:
       - action: input_text.set_value
         target: {entity_id: input_text.vimar_call_owner}
         data: {value: ""}
+
+  # The callers' pictures are kept for 3 months: every night delete those older than 90 days.
+  - alias: Vimar - delete door pictures older than 3 months
+    id: vimar_clean_pictures
+    triggers:
+      - trigger: time
+        at: "03:30:00"
+    actions:
+      - action: shell_command.vimar_clean_pictures

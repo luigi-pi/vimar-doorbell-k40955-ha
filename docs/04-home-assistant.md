@@ -79,9 +79,9 @@ Settings → Devices & services → **Add integration → Generic Camera**:
 Then open the new entity's settings and set its **Entity ID to `camera.vimar_door`** (the integration
 first names it after the URL). This is the picture that appears in the ring notification.
 
-**For the frozen picture** (the ring notification and the later *"No one answered"* both show the
-caller's frame, saved at ring time), create a folder and allow Home Assistant to write the snapshot
-into it. In the **Terminal & SSH** add-on:
+**For the saved picture** (the ring notification and the later *"not answered"* both show the
+caller's frame, saved at ring time as `DDMMYY_hhmm.jpg` and kept for 3 months), create a folder and
+allow Home Assistant to write into it. In the **Terminal & SSH** add-on:
 
 ```sh
 mkdir -p /config/www/vimar
@@ -96,6 +96,10 @@ homeassistant:
 ```
 
 Restart Home Assistant after this. Without it the notifications still work, but with no picture.
+
+> Files in `/config/www` can be opened **without logging in** by anyone who can reach your Home
+> Assistant and knows the address (`/local/vimar/DDMMYY_hhmm.jpg`). If your Home Assistant is reachable
+> from the internet, keep that in mind.
 
 ## 4.5 The package
 
@@ -154,8 +158,10 @@ Block the monitor's internet at the router, then press the doorbell:
 - **Answer** gives you two‑way audio; **the slide** opens the gate; **Hang up** ends your side;
 - answering or swiping on the indoor monitor takes the call back;
 - if **nobody answers** (not on a phone, in HA or on the monitor), the notification stays, with the
-  caller's picture and the text **“No one answered”**, until you dismiss it or the next ring. To make
-  it un‑swipeable, set `persistent: true` in the *"no one answered"* automation.
+  caller's picture and the text **“hh:mm : not answered”** (the time of the ring), until you dismiss
+  it or the next ring. To make it un‑swipeable, set `persistent: true` in the *"not answered"*
+  automation. The pictures are in `/config/www/vimar/`, named `DDMMYY_hhmm.jpg`; a nightly automation
+  deletes those older than 3 months.
 
 ## Notes & limits
 
