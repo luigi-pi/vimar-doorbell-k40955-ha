@@ -28,10 +28,10 @@ GND   TX   RX
 
 ![Where the three console pads are and how they are wired to the USB-serial adapter](img/uart-wiring.svg)
 
-<!-- TODO (maintainer): add a real photo of the pads as docs/img/uart-pads-photo.jpg, then enable the next line.
-![Photo: the console pads on the back of the monitor](img/uart-pads-photo.jpg)
--->
+![Photo: main board of the monitor, component side, with three wires soldered for the console](img/uart-pads-photo.jpg)
 
+*The monitor's main board (component side). Find the three pads by the printed label `GND TX RX`
+next to the square chip U38; compare with the labels on your board before soldering.*
 > **Only use the group marked exactly `GND TX RX`.** The board has other pad groups that look similar
 > (`TXP TXN RXP RXN`, or `GND SCLK DATA 3V3`). They are **not** serial consoles; connecting the adapter
 > there can damage the monitor.
