@@ -12,9 +12,11 @@ vendor account and no app constants. If you have **not** rooted the monitor, use
 ## How it works
 
 The key is **not** stored on the monitor's disk. `mainapp` rebuilds it at every boot from the
-secrets in `/mntfs/wifi/npc_nts_client_config.ini` and keeps it only in memory. A tiny helper
-(`vgetkey`, built with the rest of the kit) reads it out of the running `mainapp` process. It opens
-the process memory **read‑only** and prints the one value; it writes nothing to the monitor.
+secrets in `/mntfs/wifi/npc_nts_client_config.ini` and keeps it only in memory — as a parsed field,
+the name `DeviceKey2` and the 32‑character value sitting next to each other (not as `name=value`
+text). A tiny helper (`vgetkey`, built with the rest of the kit) finds the value next to that label
+in the running `mainapp`. It opens the process memory **read‑only** and prints the one value; it
+writes nothing to the monitor.
 
 The `auth_code` is the short code printed on the monitor's back label — the same one you use for the
 app and for the local web page. You supply it; it is not read from the device.
@@ -59,8 +61,8 @@ If you prefer to run the reader yourself:
 ```sh
 # on the monitor
 PID=$(pidof mainapp)
-/tmp/vgetkey $PID                 # prints  DeviceKey2=<32 chars>
-/tmp/vgetkey -m $PID              # masked: prints only the length and charset
+/tmp/vgetkey -k $PID              # prints the 32-char key next to the DeviceKey2 label
+/tmp/vgetkey -k -m $PID           # masked: prints only the length and charset
 ```
 
 Push `vgetkey` there first with `ssh <MONITOR_IP> "cat > /tmp/vgetkey && chmod +x /tmp/vgetkey" < dist/vgetkey`,
@@ -69,12 +71,12 @@ and remove it afterwards with `ssh <MONITOR_IP> "rm -f /tmp/vgetkey"`. Build `vg
 
 ## If the key is not found
 
-`vgetkey` looks for the text `DeviceKey2=` in the writable memory of `mainapp`. If a future firmware
-stores it differently, the command says so and `getkey` stops without writing.
+`vgetkey -k` looks for a 32‑character value next to a `DeviceKey2` label in `mainapp`'s memory. If a
+future firmware stores it differently, the command says so and `getkey` stops without writing.
 
-- Try scanning every region: run `vgetkey -a $PID` by hand.
-- Confirm `mainapp` is the patched key‑lock copy and is running:
-  `ssh <MONITOR_IP> "ps | grep -v grep | grep mainapp"`.
+- See how the key is stored: `/tmp/vgetkey -C '<a key you already have>' $PID` prints the bytes
+  around it, so you can spot the label (pass it with `--label`).
+- Confirm `mainapp` is running: `ssh <MONITOR_IP> "ps | grep -v grep | grep mainapp"`.
 - If it still cannot be found, the quii‑helper method
   ([4.2](04-home-assistant.md#42-get-the-stream-key-one-time)) still works. Please also
   [open an issue](https://github.com/luigi-pi/vimar-doorbell-k40955-ha/issues) so the anchor can be updated.

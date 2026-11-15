@@ -377,7 +377,6 @@ def cmd_install(a):
 
 
 # ---------------------------------------------------------------------------------------- getkey
-KEY_ANCHOR = "DeviceKey2="
 
 
 def valid_key(k):
@@ -417,25 +416,41 @@ def cmd_getkey(a):
     step("reading the stream key from mainapp's memory")
     key = ""
     for pid in pids:
-        for args in ("%s %s" % (pid, a.anchor), "-a %s %s" % (pid, a.anchor)):
-            rc, res = ssh(host, "/tmp/vgetkey " + args, capture=True, check=False)
-            vals = [ln[len(a.anchor):] for ln in res.decode("ascii", "replace").splitlines()
-                    if ln.startswith(a.anchor)]
-            good = [v for v in vals if valid_key(v)]
-            if good:
-                key = good[0]
-                break
-        if key:
+        rc, res = ssh(host, "/tmp/vgetkey -k -l %s %s" % (a.label, pid), capture=True, check=False)
+        good = sorted({ln.strip() for ln in res.decode("ascii", "replace").splitlines() if valid_key(ln.strip())})
+        if len(good) > 1:
+            ssh(host, "rm -f /tmp/vgetkey", check=False)
+            die("found %d different 32-char values near the %r label; cannot choose.\n"
+                "  Look by hand (docs/get-stream-key.md) and pass the right one with --key." % (len(good), a.label))
+        if good:
+            key = good[0]
             break
     ssh(host, "rm -f /tmp/vgetkey", check=False)
+    if a.key:                       # user supplied it explicitly -> trust that
+        key = a.key
     if not key:
-        die("could not read a 32-character key with the anchor %r.\n"
-            "  Try another anchor:  python3 tools/vimar.py getkey %s --anchor 'DeviceKey2='\n"
-            "  or run the reader by hand (docs/get-stream-key.md)." % (a.anchor, host))
+        die("could not find the stream key next to a %r label in mainapp.\n"
+            "  See docs/get-stream-key.md to look by hand, or pass it with --key." % a.label)
     masked = key[:4] + "..." + key[-4:]
     print("stream key found (%s, 32 chars)" % masked)
 
-    # --- auth_code ---
+    # --- verify against a known-good file, if asked ---
+    if a.verify:
+        try:
+            known = json.load(open(a.verify, encoding="utf-8")).get("stream_key")
+        except (ValueError, OSError) as e:
+            die("cannot read %s: %s" % (a.verify, e))
+        if known == key:
+            print("VERIFY OK: the key from memory matches %s" % a.verify)
+        else:
+            die("VERIFY FAILED: the key from memory does NOT match %s.\n"
+                "  The label may be wrong, or that file is stale. Nothing written." % a.verify)
+
+    if a.no_write:
+        print("(--no-write: nothing saved)")
+        return
+
+    # --- auth_code (only needed to write the file) ---
     auth = a.auth
     src = a.from_file or (a.out if Path(a.out).exists() else None)
     if not auth and src and Path(src).exists():
@@ -449,22 +464,6 @@ def cmd_getkey(a):
         auth = input("Enter the auth code (the code on the monitor's back label): ").strip()
     if not auth:
         die("no auth code given (use --auth, or --from an existing stream_credentials.json)")
-
-    # --- verify against a known-good file, if asked ---
-    if a.verify:
-        try:
-            known = json.load(open(a.verify, encoding="utf-8")).get("stream_key")
-        except (ValueError, OSError) as e:
-            die("cannot read %s: %s" % (a.verify, e))
-        if known == key:
-            print("VERIFY OK: the key from memory matches %s" % a.verify)
-        else:
-            die("VERIFY FAILED: the key from memory does NOT match %s.\n"
-                "  The anchor may be wrong, or that file is stale. Nothing written." % a.verify)
-
-    if a.no_write:
-        print("(--no-write: nothing saved)")
-        return
     write_credentials(a.out, key, auth)
     print("\nwrote %s  (stream_key %s, auth_code set)" % (a.out, masked))
     print("Copy it to Home Assistant at /config/vimar/stream_credentials.json (docs/04-home-assistant.md, 4.2).")
@@ -516,7 +515,8 @@ def main():
     s.add_argument("--out", default="stream_credentials.json", help="file to write (default: %(default)s)")
     s.add_argument("--verify", help="compare the key with this existing stream_credentials.json and stop")
     s.add_argument("--no-write", action="store_true", help="only read/verify, do not write the file")
-    s.add_argument("--anchor", default=KEY_ANCHOR, help="memory anchor (default: %(default)s)")
+    s.add_argument("--label", default="DeviceKey2", help="field-name label next to the key (default: %(default)s)")
+    s.add_argument("--key", help="use this stream key instead of reading it from the monitor")
     s.add_argument("--dist", default=str(TOP / "dist"), help="folder with vgetkey (default: dist)")
     s.set_defaults(fn=cmd_getkey)
 
