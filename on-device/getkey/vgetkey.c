@@ -32,6 +32,7 @@
 
 static int mask = 0, allr = 0, findkey = 0;
 static const char *ctx_needle = 0;
+static const char *bopen = 0, *bclose = 0;   /* -b: text between two markers */
 static const char *label = "DeviceKey2";
 static const int keylen = 32;
 static char seen[MAXUNIQ][MAXVAL];
@@ -112,6 +113,24 @@ static void cb_findkey(char *buf, size_t n, const char *perms) {
     }
 }
 
+static const char *cb_open, *cb_close;
+static size_t cb_olen, cb_clen;
+static void cb_between(char *buf, size_t n, const char *perms) {
+    (void)perms; char val[MAXVAL]; size_t i;
+    for (i = 0; i + cb_olen <= n; i++) {
+        if (buf[i] != cb_open[0] || memcmp(buf + i, cb_open, cb_olen)) continue;
+        size_t s = i + cb_olen, j = s;
+        while (j < n && j - s < MAXVAL - 1) {
+            unsigned char c = (unsigned char)buf[j];
+            if (j + cb_clen <= n && buf[j] == cb_close[0] && memcmp(buf + j, cb_close, cb_clen) == 0) break;
+            if (c < 0x20 || c >= 0x7f) { j = s; break; }   /* not clean text -> reject */
+            j++;
+        }
+        if (j > s && j + cb_clen <= n && memcmp(buf + j, cb_close, cb_clen) == 0) {
+            memcpy(val, buf + s, j - s); val[j - s] = 0; record("", val);
+        }
+    }
+}
 static void cb_ctx(char *buf, size_t n, const char *perms) {
     size_t pad = 48, i;
     for (i = 0; i + cb_nlen <= n; i++) {
@@ -133,11 +152,13 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[a], "-k")) { findkey = 1; allr = 1; }
         else if (!strcmp(argv[a], "-l")) { if (++a >= argc) { fprintf(stderr, "-l needs a label\n"); return 2; } label = argv[a]; }
         else if (!strcmp(argv[a], "-C")) { if (++a >= argc) { fprintf(stderr, "-C needs a string\n"); return 2; } ctx_needle = argv[a]; allr = 1; }
+        else if (!strcmp(argv[a], "-b")) { if (a + 2 >= argc) { fprintf(stderr, "-b needs <open> <close>\n"); return 2; } bopen = argv[++a]; bclose = argv[++a]; allr = 1; }
         else { fprintf(stderr, "unknown option %s\n", argv[a]); return 2; }
     }
     if (a >= argc) {
         fprintf(stderr, "usage: vgetkey -k [-m] <pid>            find the stream key (DeviceKey2)\n"
                         "       vgetkey [-m] [-a] <pid> [anchor]  value after a text anchor\n"
+                        "       vgetkey -b <open> <close> <pid>   text between two markers\n"
                         "       vgetkey -C <needle> <pid>         bytes around <needle>\n");
         return 2;
     }
@@ -146,6 +167,8 @@ int main(int argc, char **argv) {
     cb_alen = strlen(cb_anchor);
     cb_needle = ctx_needle ? ctx_needle : "";
     cb_nlen = strlen(cb_needle);
+    cb_open = bopen ? bopen : ""; cb_olen = strlen(cb_open);
+    cb_close = bclose ? bclose : ""; cb_clen = strlen(cb_close);
 
     char path[64];
     snprintf(path, sizeof path, "/proc/%s/maps", pid);
@@ -163,12 +186,14 @@ int main(int argc, char **argv) {
         if (sscanf(line, "%llx-%llx %7s", &lo, &hi, perms) < 3) continue;
         if (perms[0] != 'r') continue;
         if (!allr && perms[1] != 'w') continue;
-        if (ctx_needle)   each_window(mem, lo, hi, perms, buf, cb_nlen + 2 * 48, cb_ctx);
+        if (bopen)        each_window(mem, lo, hi, perms, buf, cb_olen + MAXVAL + cb_clen, cb_between);
+        else if (ctx_needle) each_window(mem, lo, hi, perms, buf, cb_nlen + 2 * 48, cb_ctx);
         else if (findkey) each_window(mem, lo, hi, perms, buf, 256 + 64 + keylen, cb_findkey);
         else              each_window(mem, lo, hi, perms, buf, cb_alen > 1 ? cb_alen - 1 : 0, cb_scan_anchor);
     }
     free(buf); close(mem); fclose(maps);
 
+    if (bopen) { if (!nseen) { fprintf(stderr, "nothing found between %s and %s\n", bopen, bclose); return 1; } return 0; }
     if (ctx_needle) { if (!cb_hits) { fprintf(stderr, "needle not found\n"); return 1; } return 0; }
     if (findkey)    { if (!nseen) { fprintf(stderr, "no 32-char key found near a \"%s\" label\n", label); return 1; } return 0; }
     if (!nseen) { fprintf(stderr, "anchor \"%s\" not found in pid %s%s\n", cb_anchor, pid, allr ? "" : " (try -a)"); return 1; }

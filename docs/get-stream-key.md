@@ -18,8 +18,9 @@ text). A tiny helper (`vgetkey`, built with the rest of the kit) finds the value
 in the running `mainapp`. It opens the process memory **read‑only** and prints the one value; it
 writes nothing to the monitor.
 
-The `auth_code` is the short code printed on the monitor's back label — the same one you use for the
-app and for the local web page. You supply it; it is not read from the device.
+The `auth_code` is read the same way: mainapp holds it in memory as `app_token[<token>]` (you can see
+it building the login string `adminapp2&&<token>&…`). So both values come off the device and you type
+nothing. If a firmware stores the token elsewhere, pass your own with `--auth`.
 
 ## Do it
 
@@ -27,18 +28,18 @@ In the kit folder, with the monitor reachable over SSH (`ssh vimar` or `ssh root
 
 **Windows**
 ```
-python tools\vimar.py getkey <MONITOR_IP> --auth <BACK_LABEL_CODE>
+python tools\vimar.py getkey <MONITOR_IP>
 ```
 **Linux**
 ```sh
-python3 tools/vimar.py getkey <MONITOR_IP> --auth <BACK_LABEL_CODE>
+python3 tools/vimar.py getkey <MONITOR_IP>
 ```
 
-(If you use an SSH alias, pass it in place of `<MONITOR_IP>`, e.g. `getkey vimar --auth …`.)
+(If you use an SSH alias, pass it in place of `<MONITOR_IP>`, e.g. `getkey vimar`.)
 
-It copies `vgetkey` to the monitor's `/tmp`, reads the key, removes the helper again, and writes
-`stream_credentials.json` in the current folder. The key is shown only as `ab12…9f0` so it does not
-sit in your terminal history. Leave off `--auth` and it asks for the code.
+It copies `vgetkey` to the monitor's `/tmp`, reads the stream key and the auth token, removes the
+helper again, and writes `stream_credentials.json` in the current folder. Secrets are shown only
+masked, so they do not sit in your terminal history. To override the auth token, add `--auth <token>`.
 
 Then copy `stream_credentials.json` to Home Assistant at `/config/vimar/stream_credentials.json`.
 
@@ -51,8 +52,8 @@ this proves the reader before you rely on it:
 python3 tools/vimar.py getkey <MONITOR_IP> --verify path\to\old\stream_credentials.json --no-write
 ```
 
-`VERIFY OK` means the key read from memory equals your known‑good key. `--no-write` means nothing is
-saved.
+`VERIFY OK` means the key read from memory equals your known‑good key; a second line reports whether
+the auth token matches too. `--no-write` means nothing is saved.
 
 ## By hand
 
@@ -61,8 +62,9 @@ If you prefer to run the reader yourself:
 ```sh
 # on the monitor
 PID=$(pidof mainapp)
-/tmp/vgetkey -k $PID              # prints the 32-char key next to the DeviceKey2 label
-/tmp/vgetkey -k -m $PID           # masked: prints only the length and charset
+/tmp/vgetkey -k $PID                      # the 32-char stream key (next to the DeviceKey2 label)
+/tmp/vgetkey -b 'app_token[' ']' $PID     # the auth token (between these two markers)
+/tmp/vgetkey -k -m $PID                   # masked: only the length and charset
 ```
 
 Push `vgetkey` there first with `ssh <MONITOR_IP> "cat > /tmp/vgetkey && chmod +x /tmp/vgetkey" < dist/vgetkey`,

@@ -413,8 +413,8 @@ def cmd_getkey(a):
     step("copying the reader to the monitor (/tmp, removed afterwards)")
     upload(host, vg, "/tmp/vgetkey", "755")
 
-    step("reading the stream key from mainapp's memory")
-    key = ""
+    step("reading the stream key and auth token from mainapp's memory")
+    key, auth_mem = "", ""
     for pid in pids:
         rc, res = ssh(host, "/tmp/vgetkey -k -l %s %s" % (a.label, pid), capture=True, check=False)
         good = sorted({ln.strip() for ln in res.decode("ascii", "replace").splitlines() if valid_key(ln.strip())})
@@ -424,6 +424,12 @@ def cmd_getkey(a):
                 "  Look by hand (docs/get-stream-key.md) and pass the right one with --key." % (len(good), a.label))
         if good:
             key = good[0]
+            # the auth token sits in memory as app_token[<token>]
+            _, ares = ssh(host, "/tmp/vgetkey -b '%s' '%s' %s" % (a.auth_open, a.auth_close, pid), capture=True, check=False)
+            toks = sorted({ln.strip() for ln in ares.decode("ascii", "replace").splitlines()
+                           if re.fullmatch(r"[0-9A-Za-z]{16,128}", ln.strip())})
+            if len(toks) == 1:
+                auth_mem = toks[0]
             break
     ssh(host, "rm -f /tmp/vgetkey", check=False)
     if a.key:                       # user supplied it explicitly -> trust that
@@ -437,33 +443,43 @@ def cmd_getkey(a):
     # --- verify against a known-good file, if asked ---
     if a.verify:
         try:
-            known = json.load(open(a.verify, encoding="utf-8")).get("stream_key")
+            kj = json.load(open(a.verify, encoding="utf-8"))
         except (ValueError, OSError) as e:
             die("cannot read %s: %s" % (a.verify, e))
-        if known == key:
-            print("VERIFY OK: the key from memory matches %s" % a.verify)
-        else:
+        if kj.get("stream_key") != key:
             die("VERIFY FAILED: the key from memory does NOT match %s.\n"
                 "  The label may be wrong, or that file is stale. Nothing written." % a.verify)
+        print("VERIFY OK: the key from memory matches %s" % a.verify)
+        if auth_mem and kj.get("auth_code"):
+            print("VERIFY %s: the auth token from memory %s the one in %s"
+                  % (("OK", "matches", a.verify) if auth_mem == kj["auth_code"]
+                     else ("DIFF", "differs from", a.verify)))
 
     if a.no_write:
         print("(--no-write: nothing saved)")
         return
 
-    # --- auth_code (only needed to write the file) ---
+    # --- auth_code (only needed to write the file): --auth > --from > memory > existing file > ask ---
     auth = a.auth
-    src = a.from_file or (a.out if Path(a.out).exists() else None)
-    if not auth and src and Path(src).exists():
+    if not auth and a.from_file and Path(a.from_file).exists():
         try:
-            auth = json.load(open(src, encoding="utf-8")).get("auth_code")
+            auth = json.load(open(a.from_file, encoding="utf-8")).get("auth_code")
             if auth:
-                print("auth_code taken from %s" % src)
+                print("auth_code taken from %s" % a.from_file)
+        except (ValueError, OSError):
+            pass
+    if not auth and auth_mem:
+        auth = auth_mem
+        print("auth_code read from the monitor")
+    if not auth and Path(a.out).exists():
+        try:
+            auth = json.load(open(a.out, encoding="utf-8")).get("auth_code")
         except (ValueError, OSError):
             pass
     if not auth:
-        auth = input("Enter the auth code (the code on the monitor's back label): ").strip()
+        auth = input("Enter the auth code: ").strip()
     if not auth:
-        die("no auth code given (use --auth, or --from an existing stream_credentials.json)")
+        die("no auth code found or given (use --auth, or --from an existing stream_credentials.json)")
     write_credentials(a.out, key, auth)
     print("\nwrote %s  (stream_key %s, auth_code set)" % (a.out, masked))
     print("Copy it to Home Assistant at /config/vimar/stream_credentials.json (docs/04-home-assistant.md, 4.2).")
@@ -517,6 +533,8 @@ def main():
     s.add_argument("--no-write", action="store_true", help="only read/verify, do not write the file")
     s.add_argument("--label", default="DeviceKey2", help="field-name label next to the key (default: %(default)s)")
     s.add_argument("--key", help="use this stream key instead of reading it from the monitor")
+    s.add_argument("--auth-open", default="app_token[", help="marker before the auth token in memory")
+    s.add_argument("--auth-close", default="]", help="marker after the auth token in memory")
     s.add_argument("--dist", default=str(TOP / "dist"), help="folder with vgetkey (default: dist)")
     s.set_defaults(fn=cmd_getkey)
 

@@ -34,7 +34,7 @@ block the monitor's internet access.
 constants. In the kit folder, with the monitor reachable over SSH:
 
 ```
-python3 tools/vimar.py getkey <MONITOR_IP> --auth <BACK_LABEL_CODE>
+python3 tools/vimar.py getkey <MONITOR_IP>
 ```
 
 (Windows: `python`.) This writes `stream_credentials.json` in the current folder. Copy it to
