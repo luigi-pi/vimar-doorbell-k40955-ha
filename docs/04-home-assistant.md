@@ -79,6 +79,24 @@ Settings → Devices & services → **Add integration → Generic Camera**:
 Then open the new entity's settings and set its **Entity ID to `camera.vimar_door`** (the integration
 first names it after the URL). This is the picture that appears in the ring notification.
 
+**For the frozen picture** (the ring notification and the later *"No one answered"* both show the
+caller's frame, saved at ring time), create a folder and allow Home Assistant to write the snapshot
+into it. In the **Terminal & SSH** add-on:
+
+```sh
+mkdir -p /config/www/vimar
+```
+
+and add to `/config/configuration.yaml` (merge into an existing `homeassistant:` block if you have one):
+
+```yaml
+homeassistant:
+  allowlist_external_dirs:
+    - /config/www
+```
+
+Restart Home Assistant after this. Without it the notifications still work, but with no picture.
+
 ## 4.5 The package
 
 Copy [`vimar_doorbell.yaml`](../home-assistant/vimar_doorbell.yaml) to
@@ -134,7 +152,10 @@ Block the monitor's internet at the router, then press the doorbell:
 - a notification arrives at once, and a snapshot of the caller appears in it a few seconds later;
 - tapping it opens the door view with live video (the monitor keeps ringing too);
 - **Answer** gives you two‑way audio; **the slide** opens the gate; **Hang up** ends your side;
-- answering or swiping on the indoor monitor takes the call back.
+- answering or swiping on the indoor monitor takes the call back;
+- if **nobody answers** (not on a phone, in HA or on the monitor), the notification stays, with the
+  caller's picture and the text **“No one answered”**, until you dismiss it or the next ring. To make
+  it un‑swipeable, set `persistent: true` in the *"no one answered"* automation.
 
 ## Notes & limits
 

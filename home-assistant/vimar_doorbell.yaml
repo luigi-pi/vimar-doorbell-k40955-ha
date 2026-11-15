@@ -82,6 +82,7 @@ automation:
       - trigger: mqtt
         topic: vimar/k40955/event          # one message per ring from the bridge
     actions:
+      # 1) instant text-only alert, tapping it opens the Door view (card); Answer is in the card
       - repeat:
           for_each: "{{ phones.values() | map(attribute='notify') | list }}"
           sequence:
@@ -96,9 +97,16 @@ automation:
                   priority: high
                   ttl: 0
                   timeout: 60                    # removed after 60 s if nobody reacts
-                  clickAction: /lovelace/door    # opens the Door view (card); Answer is in the card
-      # R1 picture (T56): the same notification again with a frame from go2rtc. The phone fetches the picture
-      # itself (2-4 s) and replaces the text-only one; alert_once = no second sound.
+                  clickAction: /lovelace/door
+      # 2) freeze the caller while the outdoor camera is still live, so the picture survives the ring
+      #    (the live frame is gone once the ring ends - this same file feeds "No one answered" below).
+      #    Needs the folder /config/www/vimar/ and /config/www in allowlist_external_dirs (see docs/04 4.4).
+      - action: camera.snapshot
+        continue_on_error: true
+        target: {entity_id: camera.vimar_door}
+        data: {filename: /config/www/vimar/ring.jpg}
+      # 3) the same notification with the caller's picture (alert_once = no second sound). The ?<time>
+      #    makes the phone re-fetch the new frame instead of showing a cached one (R1, T56).
       - repeat:
           for_each: "{{ phones.values() | map(attribute='notify') | list }}"
           sequence:
@@ -114,7 +122,7 @@ automation:
                   ttl: 0
                   timeout: 60
                   alert_once: true
-                  image: /api/camera_proxy/camera.vimar_door
+                  image: "/local/vimar/ring.jpg?{{ now().timestamp() | int }}"
                   clickAction: /lovelace/door
 
   # Somebody answered (a phone or the indoor monitor): the ring notification goes away on every phone.
@@ -126,6 +134,39 @@ automation:
         to: [answered_HA, answered_monitor]
     actions:
       - action: script.vimar_notify_clear
+
+  # R1 (no answer): the ring ended and nobody picked up on the monitor, in HA or in the app
+  # (an answer goes ringing -> answered_*, never ringing -> idle). Replace the ring notification, in
+  # place and with the same frozen picture, by a persistent "No one answered" (stays until dismissed
+  # or the next ring). A later answer of a new ring clears it (vimar_notify_clear, same tag).
+  - alias: Vimar - "no one answered" notification
+    id: vimar_notify_missed
+    mode: single
+    max_exceeded: silent
+    variables: *phones
+    triggers:
+      - trigger: state
+        entity_id: sensor.vimar_k40955_call_state
+        from: ringing
+        to: idle
+    actions:
+      - repeat:
+          for_each: "{{ phones.values() | map(attribute='notify') | list }}"
+          sequence:
+            - action: "notify.{{ repeat.item }}"
+              data:
+                title: Doorbell
+                message: No one answered
+                data:
+                  tag: vimar_door                # replaces the ring notification, keeps its place
+                  channel: doorbell
+                  importance: default            # quiet update, no buzz
+                  alert_once: true               # no new sound
+                  sticky: true                   # stays after it is tapped
+                  image: "/local/vimar/ring.jpg?{{ now().timestamp() | int }}"
+                  clickAction: /lovelace/door
+                  # no "timeout": the notification is not auto-removed. Use persistent: true to also
+                  # stop it being swiped away.
 
   # The HA app keeps the page (stream + microphone) running in the background, so leaving the app does not end
   # the call. Locking the screen does: the Interactive sensor reports it in 3-5 s (tested 2026-11-08).
