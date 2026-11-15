@@ -117,18 +117,23 @@ cd "$TOP"
     || { cat "$WORK/vimarbridge.log" >&2; die "vimarbridge build failed"; }
 
 # ---------------------------------------------------------------- 3. vimaraudio
-say "3/3 vimaraudio"
+say "3/4 vimaraudio"
 "$CC" $F -static -Wall -o "$DIST/vimaraudio" on-device/vimaraudio/vimaraudio.c 2> "$WORK/vimaraudio.log" \
     || { cat "$WORK/vimaraudio.log" >&2; die "vimaraudio build failed"; }
 
+# ---------------------------------------------------------------- 4. vgetkey (stream-key reader)
+say "4/4 vgetkey"
+"$CC" $F -static -Wall -o "$DIST/vgetkey" on-device/getkey/vgetkey.c 2> "$WORK/vgetkey.log" \
+    || { cat "$WORK/vgetkey.log" >&2; die "vgetkey build failed"; }
+
 # ---------------------------------------------------------------- check: ARM, static
 say "checking the results"
-for f in dropbearmulti vimarbridge vimaraudio; do
+for f in dropbearmulti vimarbridge vimaraudio vgetkey; do
     h=$("${CROSS}readelf" -h "$DIST/$f")
     echo "$h" | grep -q 'Machine: *ARM' || die "$f is not an ARM program"
     "${CROSS}readelf" -l "$DIST/$f" | grep -q 'INTERP' && die "$f is not statically linked"
     echo "ok  $f  ($(wc -c < "$DIST/$f") bytes)"
 done
-( cd "$DIST" && sha256sum dropbearmulti vimarbridge vimaraudio > SHA256SUMS )
+( cd "$DIST" && sha256sum dropbearmulti vimarbridge vimaraudio vgetkey > SHA256SUMS )
 
 say "done - the files are in $DIST"

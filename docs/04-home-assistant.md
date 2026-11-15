@@ -30,23 +30,35 @@ you used so far (vEye Pro or View Door). After that the video is fully local.
 Do this **after step 3** (the key lock keeps the key from changing afterwards) and **before** you
 block the monitor's internet access.
 
-The tool for it is **[quii‑helper](https://github.com/xaer981/quii-helper)** (Python 3.10 or newer):
+**Because the monitor is rooted, read the key straight off it** — no vendor account, no app
+constants. In the kit folder, with the monitor reachable over SSH:
 
-1. Install it on the PC: `python -m pip install quii-helper` (Linux: `python3 -m pip install …`,
-   best inside a virtual environment).
-2. Follow *"Stream‑Key Bootstrap And Local Reuse"* in quii‑helper's `docs/setup.md`: you create a
-   small `.env` file with your app account, the monitor's device ID and a handful of constants of
-   the app, then run its bootstrap (`fetch_stream_credentials()` and `save(…)`).
-3. The result is a file `stream_credentials.json` with two values, `stream_key` and `auth_code`.
-   Copy it to `/config/vimar/` in Home Assistant.
+```
+python3 tools/vimar.py getkey <MONITOR_IP> --auth <BACK_LABEL_CODE>
+```
 
-> This is the least user‑friendly part of the installation: the app constants have to be looked up
-> as quii‑helper's guide describes. It is needed only once per monitor.
->
+(Windows: `python`.) This writes `stream_credentials.json` in the current folder. Copy it to
+`/config/vimar/` in Home Assistant. Full details, the by‑hand version and a `--verify` check are in
+[get-stream-key.md](get-stream-key.md).
+
+<details>
+<summary>Without root: quii‑helper (the cloud method)</summary>
+
+If you did not root the monitor, use **[quii‑helper](https://github.com/xaer981/quii-helper)**
+(Python 3.10 or newer):
+
+1. Install it: `python -m pip install quii-helper` (Linux: `python3 -m pip install …`).
+2. Follow *"Stream‑Key Bootstrap And Local Reuse"* in quii‑helper's `docs/setup.md`: create a small
+   `.env` with your app account, the monitor's device ID and a handful of app constants, then run
+   its bootstrap. The app constants have to be looked up as quii‑helper's guide describes.
+3. It writes `stream_credentials.json` (`stream_key` + `auth_code`). Copy it to `/config/vimar/`.
+</details>
+
 > Keep `stream_credentials.json` out of any backup you share — it is your device key.
 
-If the video ever stops with a *wrong key* error (for example because the key lock was switched off
-for more than a week), unblock the monitor's internet, fetch the key again and replace the file.
+With the key lock from [step 3](03-on-device.md) the key no longer changes, so this is a one‑time
+step. If the video ever stops with a *wrong key* error, read the key again the same way and replace
+the file.
 
 ## 4.3 Video relay (go2rtc)
 

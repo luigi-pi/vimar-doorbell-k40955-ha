@@ -34,6 +34,7 @@ jobs:
           qemu-arm -cpu arm1176 dist/dropbearmulti dropbearkey -t ed25519 -f /tmp/hostkey
           (qemu-arm -cpu arm1176 dist/vimarbridge 2>&1 || true) | grep usage
           (qemu-arm -cpu arm1176 dist/vimaraudio 2>&1 || true) | grep usage
+          (qemu-arm -cpu arm1176 dist/vgetkey 2>&1 || true) | grep usage
           python3 -m py_compile tools/vimar.py on-device/keylock/make_keylock.py on-device/lua-patch/make_patch.py
           sh -n on-device/ssh/ram-ssh.sh && sh -n on-device/ssh/make-permanent.sh && sh -n on-device/ssh/start.sh && sh -n on-device/boot.sh
 

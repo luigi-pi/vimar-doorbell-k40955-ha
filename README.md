@@ -36,8 +36,8 @@ helper tool, and every command is given for **Windows and Linux**. Be aware of w
   monitor, once. No parts are replaced; soldering is optional. ([Step 1](docs/01-serial-console.md))
 - **Typing commands.** About a dozen on the monitor and a dozen on the PC, copied from the guide.
 - **Time.** An afternoon for the first installation.
-- **One step is still awkward:** fetching the video key from the vendor's cloud, once
-  ([step 4.2](docs/04-home-assistant.md#42-get-the-stream-key-one-time)).
+- **The video key** is read straight off the rooted monitor, once
+  ([step 4.2](docs/04-home-assistant.md#42-get-the-stream-key-one-time)) — no vendor account needed.
 - **Firmware.** Developed on monitor firmware **V401R001B002**. On another version the tools refuse the
   parts that depend on it instead of guessing.
 
@@ -119,14 +119,15 @@ the firmware are never modified, and no vendor code is distributed in this repos
 
 | Path | What it is |
 |---|---|
-| `docs/` | the guide (steps 1–4), [building](docs/building.md), the [manual method](docs/manual-root.md) |
-| `tools/vimar.py` | PC helper for Windows / Linux: `serve`, `backup`, `install`, `status` |
+| `docs/` | the guide (steps 1–4), [get the stream key](docs/get-stream-key.md), [building](docs/building.md), the [manual method](docs/manual-root.md) |
+| `tools/vimar.py` | PC helper for Windows / Linux: `serve`, `backup`, `install`, `getkey`, `status` |
 | `build.sh` | builds the three monitor programs into `dist/` (also run by GitHub Actions for the Releases) |
 | `on-device/ssh/` | scripts run on the monitor in step 2: temporary SSH server, make it permanent / undo |
 | `on-device/vimarbridge.c` | door‑bus (UART) ⇄ MQTT bridge: ring, gate, remote answer, call state |
 | `on-device/vimaraudio/` | door audio helper (listen + talk‑back over RTSP) |
 | `on-device/lua-patch/` | tool that patches a copy of the monitor's UI so a phone can watch during a ring |
 | `on-device/keylock/` | tool that patches a copy of the monitor's main program so the video key stays valid |
+| `on-device/getkey/` | `vgetkey`: reads the video stream key out of the running monitor (no cloud) |
 | `on-device/boot.sh` | started at power‑on: puts the bridge, the patches and the audio helper in place |
 | `on-device/install.sh`, `swap_vb.sh`, `ramtest.sh`, `lua-patch/lua_b1.sh` | development helpers (Linux shell); not needed for an installation |
 | `home-assistant/quii_lan.py` | lean LAN video relay for go2rtc (`exec:` source) |

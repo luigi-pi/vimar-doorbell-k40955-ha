@@ -15,6 +15,7 @@ import argparse
 import functools
 import hashlib
 import http.server
+import os
 import ipaddress
 import re
 import shutil
@@ -374,6 +375,101 @@ def cmd_install(a):
         print("    %s tools/vimar.py status %s" % (Path(sys.executable).stem, host))
 
 
+
+# ---------------------------------------------------------------------------------------- getkey
+KEY_ANCHOR = "DeviceKey2="
+
+
+def valid_key(k):
+    return len(k) == 32 and re.fullmatch(r"[0-9A-Za-z]{32}", k) is not None
+
+
+def write_credentials(out, stream_key, auth_code):
+    import json
+    data = {"stream_key": stream_key, "auth_code": auth_code}
+    tmp = out + ".new"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, out)
+    try:
+        os.chmod(out, 0o600)
+    except OSError:
+        pass
+
+
+def cmd_getkey(a):
+    import json
+    host = a.monitor
+    vg = need(Path(a.dist) / "vgetkey", DIST_HINT)
+    if not is_arm_program(vg):
+        die("%s is not a program for the monitor (ARM)" % vg)
+
+    step("finding mainapp on the monitor")
+    _, out = ssh(host, "pidof mainapp", capture=True)
+    pids = out.decode("ascii", "replace").split()
+    if not pids:
+        die("mainapp is not running. Wait a minute after boot, then try again.")
+
+    step("copying the reader to the monitor (/tmp, removed afterwards)")
+    upload(host, vg, "/tmp/vgetkey", "755")
+
+    step("reading the stream key from mainapp's memory")
+    key = ""
+    for pid in pids:
+        for args in ("%s %s" % (pid, a.anchor), "-a %s %s" % (pid, a.anchor)):
+            rc, res = ssh(host, "/tmp/vgetkey " + args, capture=True, check=False)
+            vals = [ln[len(a.anchor):] for ln in res.decode("ascii", "replace").splitlines()
+                    if ln.startswith(a.anchor)]
+            good = [v for v in vals if valid_key(v)]
+            if good:
+                key = good[0]
+                break
+        if key:
+            break
+    ssh(host, "rm -f /tmp/vgetkey", check=False)
+    if not key:
+        die("could not read a 32-character key with the anchor %r.\n"
+            "  Try another anchor:  python3 tools/vimar.py getkey %s --anchor 'DeviceKey2='\n"
+            "  or run the reader by hand (docs/get-stream-key.md)." % (a.anchor, host))
+    masked = key[:4] + "..." + key[-4:]
+    print("stream key found (%s, 32 chars)" % masked)
+
+    # --- auth_code ---
+    auth = a.auth
+    src = a.from_file or (a.out if Path(a.out).exists() else None)
+    if not auth and src and Path(src).exists():
+        try:
+            auth = json.load(open(src, encoding="utf-8")).get("auth_code")
+            if auth:
+                print("auth_code taken from %s" % src)
+        except (ValueError, OSError):
+            pass
+    if not auth:
+        auth = input("Enter the auth code (the code on the monitor's back label): ").strip()
+    if not auth:
+        die("no auth code given (use --auth, or --from an existing stream_credentials.json)")
+
+    # --- verify against a known-good file, if asked ---
+    if a.verify:
+        try:
+            known = json.load(open(a.verify, encoding="utf-8")).get("stream_key")
+        except (ValueError, OSError) as e:
+            die("cannot read %s: %s" % (a.verify, e))
+        if known == key:
+            print("VERIFY OK: the key from memory matches %s" % a.verify)
+        else:
+            die("VERIFY FAILED: the key from memory does NOT match %s.\n"
+                "  The anchor may be wrong, or that file is stale. Nothing written." % a.verify)
+
+    if a.no_write:
+        print("(--no-write: nothing saved)")
+        return
+    write_credentials(a.out, key, auth)
+    print("\nwrote %s  (stream_key %s, auth_code set)" % (a.out, masked))
+    print("Copy it to Home Assistant at /config/vimar/stream_credentials.json (docs/04-home-assistant.md, 4.2).")
+
+
 # ---------------------------------------------------------------------------------------- status
 def cmd_status(a):
     ssh(a.monitor,
@@ -412,6 +508,17 @@ def main():
     s.add_argument("--no-keylock", action="store_true", help="do not install the key lock")
     s.add_argument("--reboot", action="store_true", help="restart the monitor when done")
     s.set_defaults(fn=cmd_install)
+
+    s = sub.add_parser("getkey", help="read the video stream key from the monitor (no cloud)")
+    s.add_argument("monitor", help="the monitor's address on your home network")
+    s.add_argument("--auth", help="auth code (the code on the monitor's back label)")
+    s.add_argument("--from", dest="from_file", help="take auth_code from an existing stream_credentials.json")
+    s.add_argument("--out", default="stream_credentials.json", help="file to write (default: %(default)s)")
+    s.add_argument("--verify", help="compare the key with this existing stream_credentials.json and stop")
+    s.add_argument("--no-write", action="store_true", help="only read/verify, do not write the file")
+    s.add_argument("--anchor", default=KEY_ANCHOR, help="memory anchor (default: %(default)s)")
+    s.add_argument("--dist", default=str(TOP / "dist"), help="folder with vgetkey (default: dist)")
+    s.set_defaults(fn=cmd_getkey)
 
     s = sub.add_parser("status", help="show what is running on the monitor")
     s.add_argument("monitor")
