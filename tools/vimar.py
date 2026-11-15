@@ -379,7 +379,7 @@ def cmd_status(a):
     ssh(a.monitor,
         "echo \"uptime: $(cut -d. -f1 /proc/uptime) s\"; echo '--- boot log (last lines)'; tail -n 25 /tmp/vb/boot.log 2>/dev/null; "
         "echo '--- running'; echo \"vimarbridge: $(pidof vimarbridge)  vimaraudio: $(pidof vimaraudio)  mainapp: $(pidof mainapp)\"; "
-        "echo \"mainapp program: $(readlink /proc/$(pidof mainapp)/exe 2>/dev/null)\"; "
+        "echo \"mainapp program: $(ps | grep -v -e grep -e interDebug | grep -o '/[^ ]*/mainapp' | head -n 1)\"; "
         "echo '--- switches'; ls %s | grep -E '^disable' || echo 'none (everything enabled)'" % REMOTE)
     print("\nGood: 'OK: mainapp behind the bridge', 'vimaraudio started', three process numbers,\n"
           "      and (with Lua patch / key lock) 'Lua patch applied' and mainapp program = %s/app/mainapp" % REMOTE)
