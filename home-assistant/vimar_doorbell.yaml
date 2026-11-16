@@ -39,9 +39,9 @@ input_text:
     name: Vimar - time of the last ring (DDMMYY_hhmm, also the picture's file name)
     max: 16
 
-# Pictures of the callers are kept for 3 months in /config/www/vimar/ (see the clean-up automation below).
+# Pictures of the callers are kept for 3 months in /media/vimar/ (login needed to view them; see the clean-up automation below).
 shell_command:
-  vimar_clean_pictures: "find /config/www/vimar -name '*.jpg' -mtime +90 -delete"
+  vimar_clean_pictures: "find /media/vimar -name '*.jpg' -mtime +90 -delete"
 
 script:
   vimar_notify_clear:
@@ -112,11 +112,11 @@ automation:
                   clickAction: /lovelace/door
       # 2) save the caller's picture while the outdoor camera is still live, as DDMMYY_hhmm.jpg
       #    (the live frame is gone once the ring ends - the same file feeds "not answered" below).
-      #    Needs the folder /config/www/vimar/ and /config/www in allowlist_external_dirs (see docs/04 4.4).
+      #    Needs the folder /media/vimar/ and /media in allowlist_external_dirs (see docs/04 4.4).
       - action: camera.snapshot
         continue_on_error: true
         target: {entity_id: camera.vimar_door}
-        data: {filename: "/config/www/vimar/{{ stamp }}.jpg"}
+        data: {filename: "/media/vimar/{{ stamp }}.jpg"}
       # 3) the same notification with the caller's picture (alert_once = no second sound, R1, T56)
       - repeat:
           for_each: "{{ phones.values() | map(attribute='notify') | list }}"
@@ -133,7 +133,7 @@ automation:
                   ttl: 0
                   timeout: 60
                   alert_once: true
-                  image: "/local/vimar/{{ stamp }}.jpg"
+                  image: "/media/local/vimar/{{ stamp }}.jpg"
                   clickAction: /lovelace/door
 
   # Somebody answered (a phone or the indoor monitor): the ring notification goes away on every phone.
@@ -176,7 +176,7 @@ automation:
                   importance: default            # quiet update, no buzz
                   alert_once: true               # no new sound
                   sticky: true                   # stays after it is tapped
-                  image: "/local/vimar/{{ stamp }}.jpg"
+                  image: "/media/local/vimar/{{ stamp }}.jpg"
                   clickAction: /lovelace/door
                   # no "timeout": the notification is not auto-removed. Use persistent: true to also
                   # stop it being swiped away.

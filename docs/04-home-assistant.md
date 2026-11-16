@@ -84,7 +84,7 @@ caller's frame, saved at ring time as `DDMMYY_hhmm.jpg` and kept for 3 months), 
 allow Home Assistant to write into it. In the **Terminal & SSH** add-on:
 
 ```sh
-mkdir -p /config/www/vimar
+mkdir -p /media/vimar
 ```
 
 and add to `/config/configuration.yaml` (merge into an existing `homeassistant:` block if you have one):
@@ -92,14 +92,15 @@ and add to `/config/configuration.yaml` (merge into an existing `homeassistant:`
 ```yaml
 homeassistant:
   allowlist_external_dirs:
-    - /config/www
+    - /media
 ```
 
 Restart Home Assistant after this. Without it the notifications still work, but with no picture.
 
-> Files in `/config/www` can be opened **without logging in** by anyone who can reach your Home
-> Assistant and knows the address (`/local/vimar/DDMMYY_hhmm.jpg`). If your Home Assistant is reachable
-> from the internet, keep that in mind.
+> The pictures are in Home Assistant's **media** folder, so they can only be opened by a logged-in
+> user (the companion app logs in by itself to show them in the notification). They are also visible
+> in **Media → Local media → vimar**. If `/media` does not exist on your install (Home Assistant
+> Container/Core), use the folder set as `media_dirs: local:` instead.
 
 ## 4.5 The package
 
@@ -160,7 +161,7 @@ Block the monitor's internet at the router, then press the doorbell:
 - if **nobody answers** (not on a phone, in HA or on the monitor), the notification stays, with the
   caller's picture and the text **“hh:mm : not answered”** (the time of the ring), until you dismiss
   it or the next ring. To make it un‑swipeable, set `persistent: true` in the *"not answered"*
-  automation. The pictures are in `/config/www/vimar/`, named `DDMMYY_hhmm.jpg`; a nightly automation
+  automation. The pictures are in `/media/vimar/` (Media → Local media → vimar), named `DDMMYY_hhmm.jpg`; a nightly automation
   deletes those older than 3 months.
 
 ## Notes & limits
