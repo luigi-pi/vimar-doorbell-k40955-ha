@@ -80,7 +80,7 @@ Then open the new entity's settings and set its **Entity ID to `camera.vimar_doo
 first names it after the URL). This is the picture that appears in the ring notification.
 
 **For the saved picture** (the ring notification and the later *"not answered"* both show the
-caller's frame, saved at ring time as `DDMMYY_hhmm.jpg` and kept for 3 months), create a folder and
+caller's frame, saved at ring time as `DDMMYY_hhmm.jpg` and kept for the number of weeks you set), create a folder and
 allow Home Assistant to write into it. In the **Terminal & SSH** add-on:
 
 ```sh
@@ -162,7 +162,15 @@ Block the monitor's internet at the router, then press the doorbell:
   caller's picture and the text **“hh:mm : not answered”** (the time of the ring), until you dismiss
   it or the next ring. To make it un‑swipeable, set `persistent: true` in the *"not answered"*
   automation. The pictures are in `/media/vimar/` (Media → Local media → vimar), named `DDMMYY_hhmm.jpg`; a nightly automation
-  deletes those older than 3 months.
+  deletes those older than the number of weeks you set.
+
+**Settings pop-up (optional).** [`settings_button.yaml`](../home-assistant/settings_button.yaml) is a
+cog button that opens a pop-up (needs the *browser_mod* integration from HACS) with: save a picture
+at every ring (on/off), weeks to keep the pictures, a button to the saved pictures, minutes the ring
+notification stays, and two high/low quality switches that are **not connected to anything yet**.
+Set the values once after the first restart: new numbers start at 1 and new switches start off.
+With *save a picture* off nothing is stored; the ring notification shows a live frame and
+*"not answered"* has no picture.
 
 ## Notes & limits
 
