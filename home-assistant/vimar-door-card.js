@@ -355,7 +355,7 @@ if (typeof customElements !== 'undefined' && !customElements.get('vimar-door-car
     _save() {
       const say = (message) => this.dispatchEvent(new CustomEvent('hass-notification',
         {detail: {message}, bubbles: true, composed: true}));
-      this._hass.callService('script', this._cfg.save_script, {})
+      Promise.resolve(this._hass.callService('script', this._cfg.save_script, {}))
         .then(() => say('Picture saved (Media > vimar)'), () => say('The picture could not be saved'));
     }
 
