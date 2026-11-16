@@ -28,6 +28,8 @@ export const DEFAULTS = {
   owner: 'input_text.vimar_call_owner',             // HA user id of the person who answered (set by the script)
   priority: 'input_button.vimar_monitor_priority',  // pressed when someone swipes the monitor's remote page (T57)
   answer_script: 'vimar_answer',
+  save_script: 'vimar_save_picture',                // the video's save (floppy) button: HA saves the picture in
+                                                    // /media/vimar/. '' = the WebRTC card's browser download
   topic: 'vimar/k40955/cmd',
   mode: 'webrtc',
   media: 'video,audio,microphone',
@@ -316,6 +318,9 @@ if (typeof customElements !== 'undefined' && !customElements.get('vimar-door-car
           streams: [{url: this._cfg.stream, mode: this._cfg.mode, media: this._cfg.media}],
           muted: this._cfg.muted, ui: true, style: CAM_STYLE,
         });
+        // The WebRTC card's save (floppy) button calls its saveScreenshot(), a download in the browser.
+        // Replace it on this element: Home Assistant saves the picture with the ring pictures instead.
+        if (this._cfg.save_script) this._cam.saveScreenshot = () => this._save();
       }
       this._cam.hass = this._hass;
       ph.hidden = true;
@@ -345,6 +350,13 @@ if (typeof customElements !== 'undefined' && !customElements.get('vimar-door-car
       this._m = {live: false, myCall: this._m.myCall};
       this._key = '';
       this._update();
+    }
+
+    _save() {
+      const say = (message) => this.dispatchEvent(new CustomEvent('hass-notification',
+        {detail: {message}, bubbles: true, composed: true}));
+      this._hass.callService('script', this._cfg.save_script, {})
+        .then(() => say('Picture saved (Media > vimar)'), () => say('The picture could not be saved'));
     }
 
     _gate() {

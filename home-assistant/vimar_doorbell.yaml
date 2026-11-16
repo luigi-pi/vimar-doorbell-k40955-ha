@@ -90,6 +90,18 @@ script:
             - action: "notify.{{ repeat.item }}"
               data: {message: clear_notification, data: {tag: vimar_door}}
 
+  # Called by the save (floppy) button on the card's video: one frame of the running video goes to the
+  # folder of the ring pictures, as DDMMYY_hhmmss.jpg (with seconds, so that it never replaces the ring
+  # picture of the same minute). Works whatever the "save a picture at every ring" switch says.
+  vimar_save_picture:
+    alias: Vimar - save the current door picture (save button on the video)
+    mode: single
+    max_exceeded: silent
+    sequence:
+      - action: camera.snapshot
+        target: {entity_id: camera.vimar_door}
+        data: {filename: "/media/vimar/{{ now().strftime('%d%m%y_%H%M%S') }}.jpg"}
+
   # Called by the card's Answer button with the id of the logged-in user.
   vimar_answer:
     alias: Vimar - answer from HA (remembers who answered)

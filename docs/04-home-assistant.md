@@ -164,6 +164,9 @@ Block the monitor's internet at the router, then press the doorbell:
   automation. The pictures are in `/media/vimar/` (Media → Local media → vimar), named `DDMMYY_hhmm.jpg`; a nightly automation
   deletes those older than the number of weeks you set.
 
+**Save button.** The floppy-disk button on the video saves the current frame in the same folder
+(`/media/vimar/`, named `DDMMYY_hhmmss.jpg`) instead of downloading it to the phone.
+
 **Settings pop-up (optional).** [`settings_button.yaml`](../home-assistant/settings_button.yaml) is a
 cog button that opens a pop-up (needs the *browser_mod* integration from HACS) with: save a picture
 at every ring (on/off), weeks to keep the pictures, a button to the saved pictures, minutes the ring
