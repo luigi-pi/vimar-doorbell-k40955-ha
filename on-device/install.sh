@@ -7,6 +7,8 @@
 #   ./install.sh rollback                restore *.prev, remove vimaraudio + media.conf (takes effect at next boot)
 #   ./install.sh audio-off|audio-on      disable/enable only the media helper at next boot
 #   ./install.sh app keylock|hq <dir>    install a patched mainapp (<dir>/mainapp, e.g. from keylock/make_keylock.py) in /mntfs/vimarbridge/app
+#   ./install.sh app-hq <file>           install the HQ video build (make_keylock.py --hq output) as app-hq/mainapp;
+#                                        used when HA's "High quality video" switch is on (boot.sh, app.mode)
 #   ./install.sh app stock               remove it (stock mainapp from next boot); boot.sh falls back to stock by itself
 #                                        if the patched build does not start
 H=${VIMAR_SSH:-vimar}
@@ -60,6 +62,12 @@ app)
             echo '--- installed ($mode):'; sha256sum $D/app/* | cut -c1-8,65-; df -h /mntfs | tail -1"
     fi
     echo "Reboot the monitor to apply (ssh $H reboot), then: $0 verify"
+    ;;
+app-hq)
+    f=${2:?file}; [ -f "$f" ] || { echo "missing $f"; exit 1; }
+    ssh $H "rm -rf $D/app-hq.new && mkdir -p $D/app-hq.new && cat > $D/app-hq.new/mainapp && chmod 755 $D/app-hq.new/mainapp" < "$f" || exit 1
+    ssh $H "rm -rf $D/app-hq && mv $D/app-hq.new $D/app-hq && sync && sha256sum $D/app-hq/mainapp | cut -c1-8"
+    echo "HQ build installed; switch it from Home Assistant (needs the new boot.sh + vimarbridge)"
     ;;
 audio-off) ssh $H "touch $D/disable-audio && sync && echo 'media helper off from next boot'" ;;
 audio-on)  ssh $H "rm -f $D/disable-audio && sync && echo 'media helper on from next boot'" ;;

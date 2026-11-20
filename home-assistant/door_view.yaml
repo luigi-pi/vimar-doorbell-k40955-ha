@@ -55,6 +55,4 @@ cards:
                       - entity: input_number.vimar_notify_minutes
                         name: Ring notification stays (minutes)
                       - entity: input_boolean.vimar_video_hq
-                        name: High quality video (not connected yet)
-                      - entity: input_boolean.vimar_picture_hq
-                        name: High quality pictures (not connected yet)
+                        name: High quality video and pictures (~15 s to switch)

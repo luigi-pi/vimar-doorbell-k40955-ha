@@ -64,12 +64,9 @@ input_boolean:
   vimar_save_pictures:
     name: Vimar - save a picture at every ring
     icon: mdi:content-save-outline
-  vimar_video_hq:            # placeholder: not connected to anything yet
+  vimar_video_hq:            # 896x576 instead of 352x288, also for the pictures (automation "video quality")
     name: Vimar - high quality video
     icon: mdi:video-high-definition
-  vimar_picture_hq:          # placeholder: not connected to anything yet
-    name: Vimar - high quality pictures
-    icon: mdi:image-size-select-large
 
 # Pictures of the callers are kept in /media/vimar/ (login needed to view them) for the number of weeks set
 # in input_number.vimar_keep_weeks (13 if unset); see the clean-up automation at the end.
@@ -306,6 +303,29 @@ automation:
       - action: input_text.set_value
         target: {entity_id: input_text.vimar_call_owner}
         data: {value: ""}
+
+  # Switch "High quality video": the monitor's main program is restarted with the HQ build (896x576, pictures
+  # too) or the normal one (352x288). Takes about 15 s, the monitor's screen restarts and an open video
+  # reconnects by itself. Never during a ring or a call: it waits for idle / viewing (the bridge checks too).
+  # Needs the HQ build on the monitor (tools/vimar.py install, or on-device/install.sh app-hq).
+  # Keep the monitor's REC button on off or picture with HQ on (video recording uses the same stream).
+  - alias: Vimar - video quality
+    id: vimar_video_quality
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.vimar_video_hq
+        to: ["on", "off"]
+      - trigger: homeassistant
+        event: start
+    actions:
+      - wait_template: "{{ states('sensor.vimar_k40955_call_state') in ['idle', 'viewing'] }}"
+        timeout: "00:30:00"
+        continue_on_timeout: false
+      - action: mqtt.publish
+        data:
+          topic: "vimar/k40955/cmd/video_{{ 'hq' if is_state('input_boolean.vimar_video_hq', 'on') else 'std' }}"
+          payload: PRESS
 
   # Every night delete the callers' pictures older than the set number of weeks.
   - alias: Vimar - delete old door pictures

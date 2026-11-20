@@ -711,6 +711,25 @@ static int publish_state(void)
     return mqtt_publish(t, (cur_state >= 0 && cur_state < N_STATES) ? st_name[cur_state] : "idle", 1);
 }
 
+/* Video quality (HA switch "High quality video"): cmd/video_hq or cmd/video_std. Only in idle / viewing: boot.sh
+   restarts mainapp with the HQ or the normal build (about 12 s), which would cut a ring or a call. The request is
+   a file for boot.sh's supervisor; boot.sh keeps the choice on /mntfs for the next boot. */
+#define APP_WANT "/tmp/vb/app.want"
+static void video_request(const char *mode)
+{
+    if (cur_state != 0 && cur_state != 5) {          /* st_name: 0 idle, 5 viewing */
+        LOG("mqtt: video quality %s refused, call state %d\n", mode, cur_state);
+        return;
+    }
+    int fd = open(APP_WANT ".tmp", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) { LOG("mqtt: cannot write %s: %s\n", APP_WANT, strerror(errno)); return; }
+    write(fd, mode, strlen(mode));
+    write(fd, "\n", 1);
+    close(fd);
+    rename(APP_WANT ".tmp", APP_WANT);
+    LOG("mqtt: video quality %s requested\n", mode);
+}
+
 static void on_publish(const unsigned char *b, size_t n)
 {
     if (n < 2) return;
@@ -733,6 +752,8 @@ static void on_publish(const unsigned char *b, size_t n)
     else if (!strcmp(what, "answer")) c = 'A';
     else if (!strcmp(what, "answer_remote")) c = 'R';
     else if (!strcmp(what, "end_remote")) c = 'E';
+    else if (!strcmp(what, "video_hq")) { video_request("hq"); return; }
+    else if (!strcmp(what, "video_std")) { video_request("std"); return; }
     if (c) { LOG("mqtt: command %s\n", what); write(pairfd_g, &c, 1); }
 }
 

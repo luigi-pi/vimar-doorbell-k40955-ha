@@ -73,7 +73,8 @@ The command tells you what it does:
 
 1. checks your settings and fetches the broker's certificate (saved as `broker.pem`);
 2. copies the Lua file and the main program **from your monitor** into the folder `work`, and patches
-   the copies. Both tools only accept the files of firmware **V401R001B002**; with any other firmware
+   the copies (the main program twice: the key lock, and the key lock + high quality video that you
+   switch on later in Home Assistant). Both tools only accept the files of firmware **V401R001B002**; with any other firmware
    they are skipped with a clear message and the rest is still installed;
 3. copies everything to `/mntfs/vimarbridge` on the monitor, checking each file after the copy;
 4. adds the start line to `/mntfs/dropbear/start.sh`.
@@ -115,7 +116,7 @@ Each line is one command on the PC, followed by `ssh root@<MONITOR_IP> reboot`.
 | Switch **everything** of this step off (monitor behaves as delivered) | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable"` |
 | Switch off only the Lua patch | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable-lua"` |
 | Switch off only the audio helper | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable-audio"` |
-| Switch off only the key lock | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable-app"` |
+| Switch off only the key lock (and HQ video) | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable-app"` |
 | Switch a part on again | the same line with `rm` instead of `touch` |
 | Remove this step completely | `ssh root@<MONITOR_IP> "touch /mntfs/vimarbridge/disable"`, reboot, then `ssh root@<MONITOR_IP> "rm -rf /mntfs/vimarbridge"` |
 
@@ -123,7 +124,8 @@ The installer keeps the previous version of each program next to the new one (`*
 
 If the bridge ever stops, `boot.sh` gives the door bus back to the monitor's own program and restarts
 it, so the intercom keeps working on its own. If the key‑lock copy of the main program does not
-start, `boot.sh` falls back to the original by itself.
+start, `boot.sh` falls back to the original by itself; if the HQ video copy does not start, it goes
+back to the key-lock copy and sets the quality to normal.
 
 ## Changing something later
 

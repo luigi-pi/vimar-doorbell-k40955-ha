@@ -19,11 +19,22 @@ echo "$(date) boot.sh start"
 for f in vimarbridge bridge.conf broker.pem; do [ -e $D/$f ] || { echo "missing $D/$f, abort"; exit 1; }; done
 if pidof vimarbridge >/dev/null || [ -e /dev/ttySGK1.real ]; then echo "bridge already active, abort"; exit 1; fi
 
-# optional patched mainapp (T33 key lock / T34 HQ video) in $D/app: mainapp [+ goke_prm.ini]; disable: touch $D/disable-app
-APP=/usr/local/app/mainapp; INI=/usr/local/config/goke_prm.ini
+# optional patched mainapp (T33 key lock) in $D/app: mainapp [+ goke_prm.ini]; disable: touch $D/disable-app
+# optional HQ video build (key lock + 896x576 live view) in $D/app-hq/mainapp, used when $D/app.mode says "hq".
+#   Switched from HA (switch "High quality video" -> bridge -> $R/app.want, see the supervisor below).
+STOCK=/usr/local/app/mainapp; STOCK_INI=/usr/local/config/goke_prm.ini
+KEY=$STOCK; KEY_INI=$STOCK_INI
 if [ -x $D/app/mainapp ] && [ ! -e $D/disable-app ]; then
-    APP=$D/app/mainapp; [ -f $D/app/goke_prm.ini ] && INI=$D/app/goke_prm.ini
+    KEY=$D/app/mainapp; [ -f $D/app/goke_prm.ini ] && KEY_INI=$D/app/goke_prm.ini
 fi
+HQ=$D/app-hq/mainapp
+pick_app() {                   # sets APP / INI from $D/app.mode
+    APP=$KEY; INI=$KEY_INI
+    if [ "$(cat $D/app.mode 2>/dev/null)" = hq ] && [ -x $HQ ] && [ ! -e $D/disable-app ]; then
+        APP=$HQ; INI=$STOCK_INI
+    fi
+}
+pick_app
 start_mainapp() {
     cd /usr/local/app
     setsid env -i \
@@ -34,14 +45,32 @@ start_mainapp() {
         TSLIB_CONFFILE=/usr/local/app/ts.config SHELL=/bin/sh PWD=/usr/local/app \
         interDebug $APP 9527 </dev/console >/dev/console 2>&1 &
 }
-start_mainapp_checked() {      # patched build not running after 10 s -> stock (intercom must keep working)
+start_mainapp_checked() {      # patched build not running after 10 s -> next one down (intercom must keep working)
     start_mainapp
-    [ "$APP" = /usr/local/app/mainapp ] && return
+    [ "$APP" = $STOCK ] && return
     sleep 10
     pidof mainapp >/dev/null && { echo "$(date) mainapp: $APP (ini $INI)"; return; }
+    if [ "$APP" = $HQ ]; then
+        echo "$(date) HQ mainapp did not start: normal video (app.mode set to std)"
+        echo std > $D/app.mode; sync
+        APP=$KEY; INI=$KEY_INI
+        start_mainapp_checked
+        return
+    fi
     echo "$(date) patched mainapp did not start: falling back to stock"
-    APP=/usr/local/app/mainapp; INI=/usr/local/config/goke_prm.ini
+    APP=$STOCK; INI=$STOCK_INI
     start_mainapp
+}
+app_switch() {                 # request from HA via the bridge (only sent in idle / viewing): hq | std
+    want=$(cat $R/app.want 2>/dev/null); rm -f $R/app.want
+    case "$want" in hq|std) ;; *) echo "$(date) app.want: ignored '$want'"; return ;; esac
+    echo $want > $D/app.mode.tmp && mv $D/app.mode.tmp $D/app.mode && sync
+    old=$APP; pick_app
+    if [ "$want" = hq ] && [ "$APP" != $HQ ]; then echo "$(date) video hq requested, but $HQ is not installed"; fi
+    [ "$APP" = "$old" ] && { echo "$(date) video $want: already running ($APP)"; return; }
+    echo "$(date) video $want: restarting mainapp ($APP)"
+    stop_mainapp
+    start_mainapp_checked
 }
 stop_mainapp() {
     kill $(pidof interDebug) $(pidof mainapp) 2>/dev/null
@@ -102,9 +131,14 @@ restarts=0
 # logs live in RAM: keep each under 1 MB (last 256 KB kept; same file, writers append)
 trim() { s=$(wc -c < "$1" 2>/dev/null || echo 0); [ "$s" -gt 1048576 ] && { tail -c 262144 "$1" > "$1.t" && cat "$1.t" > "$1"; rm -f "$1.t"; }; }
 
-# 4. supervisor: restart the media helper if it dies (max 5); if the bridge dies, go back to stock
+# 4. supervisor: video quality switch (every 2 s); restart the media helper if it dies (max 5);
+#    if the bridge dies, go back to stock
+rm -f $R/app.want
+n=0
 while pidof vimarbridge >/dev/null; do
-    sleep 10
+    sleep 2
+    [ -e $R/app.want ] && app_switch
+    n=$((n+1)); [ $n -lt 5 ] && continue; n=0
     for f in $R/bridge.log $R/audio.log $R/boot.log; do trim $f; done
     if [ $media_ok = 1 ] && ! pidof vimaraudio >/dev/null; then
         if [ $restarts -lt 5 ]; then restarts=$((restarts+1)); echo "$(date) vimaraudio died, restart $restarts/5"; start_media

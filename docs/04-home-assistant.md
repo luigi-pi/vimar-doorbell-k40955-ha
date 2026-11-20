@@ -169,7 +169,11 @@ Block the monitor's internet at the router, then press the doorbell:
 
 **Settings pop-up (optional).** The cog under the video in [`door_view.yaml`](../home-assistant/door_view.yaml) opens a pop-up (needs the *browser_mod* integration from HACS) with: save a picture
 at every ring (on/off), weeks to keep the pictures, a button to the saved pictures, minutes the ring
-notification stays, and two high/low quality switches that are **not connected to anything yet**.
+notification stays, and **High quality video**: 896×576 instead of 352×288 for the video and the
+saved pictures. Switching takes about 15 s: the monitor's own program restarts (its screen too), an
+open video reconnects by itself, and it never happens during a ring or a call (it waits until the
+monitor is free). Keep the monitor's REC button on *off* or *picture* while HQ is on: video recording
+uses the same picture stream.
 Set the values once after the first restart: new numbers start at 1 and new switches start off.
 With *save a picture* off nothing is stored; the ring notification shows a live frame and
 *"not answered"* has no picture.

@@ -238,9 +238,10 @@ def read_conf(path):
     return conf
 
 
-def patch_tool(script, src, dst):
+def patch_tool(script, src, dst, *opts):
     """Run one of the patch tools of this kit. Returns (ok, message)."""
-    r = subprocess.run([sys.executable, "-I", str(script), str(src), str(dst)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    r = subprocess.run([sys.executable, "-I", str(script), *opts, str(src), str(dst)],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     return r.returncode == 0, r.stdout.decode("utf-8", "replace").strip()
 
 
@@ -293,7 +294,7 @@ def cmd_install(a):
     if rc != 0:
         die("the permanent SSH server is not installed on this monitor yet (docs/02-root-and-backup.md)")
 
-    lua_file = keylock_file = None
+    lua_file = keylock_file = hq_file = None
     if not a.no_lua:
         step("Lua patch: video on the phone while the monitor rings")
         tool = TOP / "on-device" / "lua-patch" / "make_patch.py"
@@ -319,6 +320,10 @@ def cmd_install(a):
         if ok:
             keylock_file = work / "mainapp.keylock"
             print("patched (%s)" % msg)
+            ok, msg = patch_tool(TOP / "on-device" / "keylock" / "make_keylock.py", src, work / "mainapp.hq", "--hq")
+            if ok:
+                hq_file = work / "mainapp.hq"
+                print("HQ video build (%s), switched on from Home Assistant" % msg)
         else:
             print("SKIPPED: your monitor's mainapp is not the analysed one (firmware V401R001B002): %s\n"
                   "         WARNING: without the key lock the video stops after at most 7 days, until you\n"
@@ -358,6 +363,15 @@ def cmd_install(a):
             ssh(host, "rm -rf %s/app.prev; [ -d %s/app ] && mv %s/app %s/app.prev; mv %s/app.new %s/app"
                 % (REMOTE, REMOTE, REMOTE, REMOTE, REMOTE, REMOTE))
             print("app/mainapp (key lock)")
+    if hq_file:
+        _, cur = ssh(host, "sha256sum %s/app-hq/mainapp 2>/dev/null; true" % REMOTE, capture=True)
+        if cur[:64].decode("ascii", "replace") == sha256_file(hq_file):
+            print("app-hq/mainapp (HQ video) already installed")
+        else:
+            ssh(host, "rm -rf %s/app-hq.new && mkdir -p %s/app-hq.new" % (REMOTE, REMOTE))
+            upload(host, hq_file, REMOTE + "/app-hq.new/mainapp", "755")
+            ssh(host, "rm -rf %s/app-hq; mv %s/app-hq.new %s/app-hq" % (REMOTE, REMOTE, REMOTE))
+            print("app-hq/mainapp (HQ video, off until switched on in Home Assistant)")
     ssh(host, "grep -q vimarbridge/boot.sh /mntfs/dropbear/start.sh || echo '%s' >> /mntfs/dropbear/start.sh; sync" % BOOT_HOOK)
     _, hook = ssh(host, "grep -c vimarbridge/boot.sh /mntfs/dropbear/start.sh", capture=True)
     if hook.strip() != b"1":
