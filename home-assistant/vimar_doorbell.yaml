@@ -24,7 +24,7 @@
 # 1) PACKAGE: copy to /config/packages/vimar_doorbell.yaml (packages enabled in configuration.yaml), restart HA.
 # 2) CARD: copy vimar-door-card.js to /config/www/ and add it as a dashboard resource (docs/04-home-assistant.md, 4.6).
 # 3) VIEW: door_view.yaml (Edit view -> Edit in YAML, paste); delete the old Door / Door live views.
-# 4) SETTINGS (optional): settings_button.yaml, a button card that opens the settings pop-up (needs browser_mod).
+# 4) SETTINGS: the cog under the video in door_view.yaml opens the settings pop-up (needs browser_mod).
 
 # ============================== PACKAGE ===================================================================
 input_button:
@@ -40,7 +40,7 @@ input_text:
     name: Vimar - time of the last ring (DDMMYY_hhmm, also the picture's file name)
     max: 16
 
-# Settings, shown in the settings pop-up (settings_button.yaml). Set them once after the first restart:
+# Settings, shown in the settings pop-up (the cog in door_view.yaml). Set them once after the first restart:
 # a new number starts at its minimum and a new switch starts off.
 input_number:
   vimar_keep_weeks:

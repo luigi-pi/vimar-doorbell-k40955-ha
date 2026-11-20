@@ -167,8 +167,7 @@ Block the monitor's internet at the router, then press the doorbell:
 **Save button.** The floppy-disk button on the video saves the current frame in the same folder
 (`/media/vimar/`, named `DDMMYY_hhmmss.jpg`) instead of downloading it to the phone.
 
-**Settings pop-up (optional).** [`settings_button.yaml`](../home-assistant/settings_button.yaml) is a
-cog button that opens a pop-up (needs the *browser_mod* integration from HACS) with: save a picture
+**Settings pop-up (optional).** The cog under the video in [`door_view.yaml`](../home-assistant/door_view.yaml) opens a pop-up (needs the *browser_mod* integration from HACS) with: save a picture
 at every ring (on/off), weeks to keep the pictures, a button to the saved pictures, minutes the ring
 notification stays, and two high/low quality switches that are **not connected to anything yet**.
 Set the values once after the first restart: new numbers start at 1 and new switches start off.
