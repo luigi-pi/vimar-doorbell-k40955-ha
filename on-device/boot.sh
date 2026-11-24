@@ -70,12 +70,35 @@ app_switch() {                 # request from HA via the bridge (only sent in id
     [ "$APP" = "$old" ] && { echo "$(date) video $want: already running ($APP)"; return; }
     echo "$(date) video $want: restarting mainapp ($APP)"
     stop_mainapp
+    bridge_reset
     start_mainapp_checked
 }
 stop_mainapp() {
     kill $(pidof interDebug) $(pidof mainapp) 2>/dev/null
     i=0; while pidof mainapp >/dev/null && [ $i -lt 20 ]; do usleep 100000; i=$((i+1)); done
     pidof mainapp >/dev/null && kill -9 $(pidof mainapp)
+}
+# mainapp is stopped: the bridge forgets the live session / call it was serving and puts call audio and the door
+# camera off on the bus. A killed mainapp never sends those frames itself (only its own close path does), so
+# without this the outdoor camera stayed on and the bridge skipped the camera-off at the end of later calls.
+bridge_reset() {
+    : > $R/mainapp.reset
+    i=0; while [ -e $R/mainapp.reset ] && [ $i -lt 50 ]; do usleep 100000; i=$((i+1)); done
+    rm -f $R/mainapp.reset      # bridge not answering (5 s): do not leave a stale request behind
+    usleep 500000               # the bridge sends 43 00 + 41 right after taking the request
+}
+# "Reboot monitor" button in HA -> bridge -> $R/reboot.want. Mainapp is stopped cleanly first, the door camera is
+# put off, then the monitor reboots (everything in RAM, including this request, is gone afterwards).
+do_reboot() {
+    rm -f $R/reboot.want
+    echo "$(date) reboot requested from HA: stopping mainapp, camera off, reboot"
+    stop_mainapp
+    bridge_reset
+    sync
+    reboot || echo "$(date) reboot command failed"
+    sleep 30                    # a real reboot kills this script long before; still here = it did not happen
+    echo "$(date) still running 30 s after the reboot request: restarting mainapp"
+    start_mainapp_checked
 }
 LUA_O=/usr/local/app/luaprj/src/base/base.lua
 LUA_ORIG=77d3402119e91d34042874b2a776fc93; LUA_PATCHED=88d80b8b01aea3c9d2f1eb3f55c1c627
@@ -131,13 +154,22 @@ restarts=0
 # logs live in RAM: keep each under 1 MB (last 256 KB kept; same file, writers append)
 trim() { s=$(wc -c < "$1" 2>/dev/null || echo 0); [ "$s" -gt 1048576 ] && { tail -c 262144 "$1" > "$1.t" && cat "$1.t" > "$1"; rm -f "$1.t"; }; }
 
-# 4. supervisor: video quality switch (every 2 s); restart the media helper if it dies (max 5);
+# 4. supervisor: video quality switch and reboot request (every 2 s); a mainapp that stopped or was replaced
+#    without the bridge noticing (crash) gets the same bridge reset; restart the media helper if it dies (max 5);
 #    if the bridge dies, go back to stock
-rm -f $R/app.want
+rm -f $R/app.want $R/reboot.want
+mp=$(pidof mainapp)
 n=0
 while pidof vimarbridge >/dev/null; do
     sleep 2
-    [ -e $R/app.want ] && app_switch
+    cur=$(pidof mainapp)
+    if [ -n "$mp" ] && [ "$cur" != "$mp" ]; then
+        echo "$(date) mainapp stopped or restarted on its own: bridge reset (camera off)"
+        bridge_reset
+    fi
+    mp=$cur
+    [ -e $R/reboot.want ] && do_reboot
+    if [ -e $R/app.want ]; then app_switch; mp=$(pidof mainapp); fi
     n=$((n+1)); [ $n -lt 5 ] && continue; n=0
     for f in $R/bridge.log $R/audio.log $R/boot.log; do trim $f; done
     if [ $media_ok = 1 ] && ! pidof vimaraudio >/dev/null; then

@@ -178,6 +178,14 @@ Set the values once after the first restart: new numbers start at 1 and new swit
 With *save a picture* off nothing is stored; the ring notification shows a live frame and
 *"not answered"* has no picture.
 
+The same pop-up shows the monitor's **CPU usage, CPU load, memory used and memory available**
+and has a **Reboot** button (asks for confirmation first). They are ordinary entities of the *Vimar
+K40955* device (`sensor.vimar_k40955_cpu_usage`, `…_cpu_load_1_min`, `…_memory_used`,
+`…_memory_available`, `button.vimar_k40955_reboot_monitor`), so you can also put them on any other
+dashboard, graph them, or use them in automations (for example, press the reboot button when
+*Memory available* stays very low). If your entity ids differ, check *Settings → Devices → Vimar
+K40955* and adjust the ids at the end of the pop-up in `door_view.yaml`.
+
 ## Notes & limits
 
 - Video is **H.264 Main, 352×288**. Chrome and the Android app play it over WebRTC (with microphone).

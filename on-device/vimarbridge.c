@@ -6,7 +6,8 @@
  *   MQTT process; injects command frames ONLY between mainapp's frames.
  * Process 2 (mqtt, child): one persistent MQTT 3.1.1 connection over TLS
  *   (BearSSL, server key pinned from a cert file -> no CA, no clock needed).
- *   Publishes HA discovery (event + buttons), ring events, availability (LWT).
+ *   Publishes HA discovery (event + buttons + health sensors), ring events, availability (LWT),
+ *   and every 30 s the monitor's CPU / memory (read from /proc) for HA sensors.
  *   If it dies, the relay keeps forwarding and restarts it.
  *
  * Usage: vimarbridge <real_tty> <link_path> <config_file> [-v]
@@ -142,6 +143,12 @@ static void set_state(int s, int pairfd, const char *why)
 /* call-audio gate for the separate media helper (vimaraudio): "1" while 43 01 is in effect, else "0".
    Written atomically (tmp + rename). Any way a call ends writes "0". */
 #define AUDIO_STATE "/tmp/vb/audio.state"
+/* mainapp was stopped from outside (boot.sh: quality switch, reboot button, crash). A killed mainapp never sends
+   the frames that end a live session (43 00, 41: only its own close path does, the SIGTERM handler does not), so
+   the door camera stayed on and the relay went on believing in the session (live_open), which made every later
+   "End remote" skip its 41. boot.sh creates this file once mainapp is stopped: the relay forgets the session and
+   the call, and puts call audio and door camera off on the bus. */
+#define MAINAPP_RESET "/tmp/vb/mainapp.reset"
 /* longest stock ringtone: melody a04 20 s x 2 = ~40 s (T48). mainapp's ringtone cannot be stopped from the bus,
    and in answered_app nothing in the Lua stops it, so 43 01 before its end puts it on the door bus */
 #define RINGTONE_MS 42000
@@ -410,6 +417,18 @@ int main(int argc, char **argv)
                     else LOG("relay: live session open: no 41 (mainapp ends the bus monitor when it closes)\n");
                 }
             }
+        }
+        if (!pendlen && access(MAINAPP_RESET, F_OK) == 0) {       /* mainapp stopped from outside */
+            unsigned char z = 0;
+            unlink(MAINAPP_RESET);
+            memset(&gk, 0, sizeof gk); gkn = 0;     /* a frame cut off by the kill must not block the injection */
+            live_open = 0; ring_viewer = 0; remote_until = 0; await17 = 0; audio_at = 0; rearm_at = 0;
+            talk_faked = 0; fakelen = 0; pcmd = 0;
+            audio_state(0);
+            set_state(ST_IDLE, pairfd, "mainapp stopped");
+            pendlen  = build_frame(pend, 0x43, &z, 1);                          /* audio_led off */
+            pendlen += build_frame(pend + pendlen, 0x41, NULL, 0);              /* wifi_monitor_end: door camera off */
+            LOG("relay: mainapp stopped from outside: session forgotten, 43 00 + 41 sent\n");
         }
         if (cstate != ST_RINGING) ring_viewer = 0;
         if (cstate == ST_ANS_APP && now_ms() - app_at > 120000) set_state(ST_IDLE, pairfd, "answered_app timeout");
@@ -682,6 +701,7 @@ static int publish_discovery(void)
         { "answer_remote", "Answer remotely", "mdi:cellphone-sound" },
         { "end_remote", "End remote", "mdi:cellphone-off" },
         { "hang_up", "Hang up", "mdi:phone-hangup" },
+        { "reboot", "Reboot monitor", "mdi:restart-alert" },
     };
     for (unsigned i = 0; i < sizeof btn / sizeof btn[0]; i++) {
         snprintf(topic, sizeof topic, "homeassistant/button/%s/%s/config", c_node, btn[i][0]);
@@ -689,6 +709,24 @@ static int publish_discovery(void)
                  "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"icon\":\"%s\",\"command_topic\":\"%s/cmd/%s\","
                  "\"payload_press\":\"PRESS\",\"availability_topic\":\"%s/status\",%s}",
                  btn[i][1], c_node, btn[i][0], btn[i][2], c_base, btn[i][0], c_base, dev);
+        if (mqtt_publish(topic, js, 1)) return -1;
+    }
+    /* health sensors: one JSON message on <base>/stats, see publish_stats() */
+    static const char *sens[][4] = {
+        { "cpu", "CPU usage", "%", "mdi:cpu-32-bit" },
+        { "load", "CPU load (1 min)", "", "mdi:gauge" },
+        { "mem_used", "Memory used", "%", "mdi:memory" },
+        { "mem_free", "Memory available", "MB", "mdi:memory" },
+    };
+    for (unsigned i = 0; i < sizeof sens / sizeof sens[0]; i++) {
+        char unit[40] = "";
+        if (sens[i][2][0]) snprintf(unit, sizeof unit, "\"unit_of_measurement\":\"%s\",", sens[i][2]);
+        snprintf(topic, sizeof topic, "homeassistant/sensor/%s/%s/config", c_node, sens[i][0]);
+        snprintf(js, sizeof js,
+                 "{\"name\":\"%s\",\"unique_id\":\"%s_%s\",\"icon\":\"%s\",%s\"state_class\":\"measurement\","
+                 "\"entity_category\":\"diagnostic\",\"state_topic\":\"%s/stats\",\"value_template\":\"{{ value_json.%s }}\","
+                 "\"expire_after\":150,\"availability_topic\":\"%s/status\",%s}",
+                 sens[i][1], c_node, sens[i][0], sens[i][3], unit, c_base, sens[i][0], c_base, dev);
         if (mqtt_publish(topic, js, 1)) return -1;
     }
     /* "Remote audio on" was removed (T30): an empty retained config deletes the old entity in HA */
@@ -730,6 +768,79 @@ static void video_request(const char *mode)
     LOG("mqtt: video quality %s requested\n", mode);
 }
 
+/* Reboot button (HA): boot.sh's supervisor does the work (stops mainapp, camera off, sync, reboot); like the
+   video quality switch the request is a file in RAM. Allowed in any call state: it is the way out of a stuck one. */
+#define REBOOT_WANT "/tmp/vb/reboot.want"
+static void reboot_request(void)
+{
+    int fd = open(REBOOT_WANT, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) { LOG("mqtt: cannot write %s: %s\n", REBOOT_WANT, strerror(errno)); return; }
+    close(fd);
+    LOG("mqtt: reboot requested\n");
+}
+
+/* ---- monitor health (HA sensors): CPU and memory from /proc, published every STATS_MS ---- */
+#define STATS_MS 30000L
+static unsigned long long cpu_tot0, cpu_idle0;     /* /proc/stat counters at the previous sample */
+static int cpu_last;
+
+static int cpu_sample(unsigned long long *tot, unsigned long long *idle)
+{
+    unsigned long long v[8] = { 0 };
+    FILE *f = fopen("/proc/stat", "r");
+    if (!f) return -1;
+    int n = fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+                   &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]);
+    fclose(f);
+    if (n < 4) return -1;
+    *tot = 0;
+    for (int i = 0; i < 8; i++) *tot += v[i];
+    *idle = v[3] + v[4];                           /* idle + iowait */
+    return 0;
+}
+
+static int publish_stats(void)
+{
+    unsigned long long t, idle;
+    if (cpu_sample(&t, &idle) == 0) {
+        if (cpu_tot0 && t > cpu_tot0) {
+            cpu_last = (int)(100 * ((t - cpu_tot0) - (idle - cpu_idle0)) / (t - cpu_tot0));
+            if (cpu_last < 0) cpu_last = 0;
+            if (cpu_last > 100) cpu_last = 100;
+        }
+        cpu_tot0 = t; cpu_idle0 = idle;
+    }
+    /* memory: used = total - free - buffers - cached; available is the same without the "total" step (the kernel
+       of the monitor, 3.4, has no MemAvailable). tmpfs (/tmp) counts as cached, so this is slightly optimistic. */
+    unsigned long total = 0, mfree = 0, buffers = 0, cached = 0, v;
+    char line[128];
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (f) {
+        while (fgets(line, sizeof line, f)) {
+            if (sscanf(line, "MemTotal: %lu", &v) == 1) total = v;
+            else if (sscanf(line, "MemFree: %lu", &v) == 1) mfree = v;
+            else if (sscanf(line, "Buffers: %lu", &v) == 1) buffers = v;
+            else if (sscanf(line, "Cached: %lu", &v) == 1) cached = v;
+        }
+        fclose(f);
+    }
+    unsigned long avail = mfree + buffers + cached;
+    if (avail > total) avail = total;
+    int used_pct = total ? (int)(100UL * (total - avail) / total) : 0;
+    char load[16] = "0";                           /* first field of /proc/loadavg, copied as text (digits and '.') */
+    f = fopen("/proc/loadavg", "r");
+    if (f) {
+        char tmp[16];
+        if (fscanf(f, "%15s", tmp) == 1 && strspn(tmp, "0123456789.") == strlen(tmp)) strcpy(load, tmp);
+        fclose(f);
+    }
+    char t_[96], js[160];
+    snprintf(t_, sizeof t_, "%s/stats", c_base);
+    snprintf(js, sizeof js, "{\"cpu\":%d,\"load\":%s,\"mem_used\":%d,\"mem_free\":%lu}",
+             cpu_last, load, used_pct, avail / 1024);
+    return mqtt_publish(t_, js, 0);
+}
+
 static void on_publish(const unsigned char *b, size_t n)
 {
     if (n < 2) return;
@@ -754,6 +865,7 @@ static void on_publish(const unsigned char *b, size_t n)
     else if (!strcmp(what, "end_remote")) c = 'E';
     else if (!strcmp(what, "video_hq")) { video_request("hq"); return; }
     else if (!strcmp(what, "video_std")) { video_request("std"); return; }
+    else if (!strcmp(what, "reboot")) { reboot_request(); return; }
     if (c) { LOG("mqtt: command %s\n", what); write(pairfd_g, &c, 1); }
 }
 
@@ -831,6 +943,7 @@ static void session(void)
     if (mqtt_connect()) goto out;                     /* drives the handshake too */
     long t0 = now_ms(), last_tx = now_ms(), last_rx = now_ms();
     int discovered = 0;
+    long last_stats = now_ms() - STATS_MS;            /* first sample right after the discovery */
     for (;;) {
         br_ssl_engine_context *e = &cc.eng;
         unsigned st = br_ssl_engine_current_state(e);
@@ -850,7 +963,13 @@ static void session(void)
         }
         if (!connacked && now_ms() - t0 > 15000) { LOG("mqtt: no CONNACK\n"); break; }
 
+        if (discovered && now_ms() - last_stats >= STATS_MS) {
+            if (publish_stats()) goto out;
+            last_stats = last_tx = now_ms();
+            continue;
+        }
         long wait = 30000 - (now_ms() - last_tx);
+        if (discovered && STATS_MS - (now_ms() - last_stats) < wait) wait = STATS_MS - (now_ms() - last_stats);
         if (wait < 0) wait = 0;
         struct pollfd p[2] = { { sock, (st & BR_SSL_RECVREC) ? POLLIN : 0, 0 }, { pairfd_g, POLLIN, 0 } };
         int r = poll(p, 2, wait);
@@ -893,6 +1012,7 @@ static int mqtt_main(int pairfd, const char *cfgpath)
     if (load_config(cfgpath)) { LOG("mqtt: bad config\n"); sleep(30); return 1; }
     if (load_pinned_key(c_cert)) { LOG("mqtt: cannot load broker cert %s\n", c_cert); sleep(30); return 1; }
     int backoff = 2;
+    cpu_sample(&cpu_tot0, &cpu_idle0);                /* baseline: the first CPU value is the average since now */
     for (;;) {
         long t = now_ms();
         session();

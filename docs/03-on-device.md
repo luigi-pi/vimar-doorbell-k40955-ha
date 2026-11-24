@@ -4,7 +4,7 @@ Four small things are added to the monitor and start at every power‑on:
 
 | Component | Job |
 |---|---|
-| **vimarbridge** | passes the door bus to Home Assistant over MQTT: ring, gate, answer, hang‑up, call state |
+| **vimarbridge** | passes the door bus to Home Assistant over MQTT: ring, gate, answer, hang‑up, call state, reboot button, CPU / memory sensors |
 | **vimaraudio** | carries the door microphone and speaker (listen + talk‑back) |
 | **Lua patch** | lets a phone watch the camera *while the monitor is ringing*, without the monitor treating the viewer as an answer |
 | **Key lock** | stops the monitor from changing its video key every 7 days (without it the video in Home Assistant goes dark after a week) |
@@ -103,7 +103,28 @@ You want to see, in the boot log, `Lua patch applied`, `OK: mainapp behind the b
 `mainapp program: /mntfs/vimarbridge/app/mainapp` (the key lock).
 
 Press the doorbell: the monitor rings as always. In Home Assistant (*Settings → Devices & services →
-MQTT*) a new device with the ring event, the call state and the gate button has appeared.
+MQTT*) a new device with the ring event, the call state, the gate button, a **Reboot monitor**
+button and four health sensors (**CPU usage**, **CPU load (1 min)**, **Memory used**,
+**Memory available**) has appeared.
+
+**Reboot monitor.** The button stops the monitor's program cleanly, switches the door camera off,
+and reboots the monitor (about a minute, during which the doorbell is offline). It works in any call
+state, so it is also the way out of a stuck one. If the reboot command does not take effect, the
+monitor's program is started again by itself.
+
+**Health sensors.** Published every 30 s, read from the monitor's `/proc`. *CPU usage* is the
+average over the last 30 s. *Memory used / available* count the file cache as available; the monitor
+has only about 90 MB, so watch *Memory available* while the high quality video runs. The sensors go
+*unavailable* if the bridge stops reporting for 2.5 minutes.
+
+**Door camera.** When the monitor's program is stopped from outside (the video quality switch, the
+reboot button, or a crash) it cannot switch the door camera off itself. `boot.sh` now tells the bridge,
+which then puts call audio and the camera off on the door bus and forgets the open video session.
+Before this, the outdoor unit's camera light could stay on after a quality switch, and the bridge then
+skipped the camera-off at the end of every later call.
+
+**Updating an existing install:** run the install command of 3.3 again and reboot the monitor
+(the new `boot.sh` and `vimarbridge` are copied; the old ones are kept as `*.prev`).
 
 Continue with [step 4](04-home-assistant.md).
 

@@ -4,6 +4,8 @@
 # Opening the view starts the video in idle / viewing (autostart), which occupies the indoor monitor ("viewing"):
 # do not make it the dashboard's first view. The cog under the video opens the settings pop-up
 # (needs the browser_mod integration from HACS; without it, delete that button). With the B1 Lua patch (T55) the video also runs during a ring.
+# The pop-up also shows the monitor's CPU / memory and has a Reboot button (confirmation first); if your entity ids differ,
+# check Settings -> Devices -> Vimar K40955 and adjust the five ids at the end of the pop-up.
 title: Doorbell
 path: door
 icon: mdi:doorbell-video
@@ -56,3 +58,24 @@ cards:
                         name: Ring notification stays (minutes)
                       - entity: input_boolean.vimar_video_hq
                         name: High quality video and pictures (~15 s to switch)
+                      - type: section
+                        label: Monitor
+                      - entity: sensor.vimar_k40955_cpu_usage
+                        name: CPU usage
+                      - entity: sensor.vimar_k40955_cpu_load_1_min
+                        name: CPU load (1 min)
+                      - entity: sensor.vimar_k40955_memory_used
+                        name: Memory used
+                      - entity: sensor.vimar_k40955_memory_available
+                        name: Memory available
+                      - type: button
+                        name: Reboot monitor
+                        icon: mdi:restart-alert
+                        action_name: Reboot
+                        tap_action:
+                          action: perform-action
+                          perform_action: button.press
+                          target:
+                            entity_id: button.vimar_k40955_reboot_monitor
+                          confirmation:
+                            text: Reboot the indoor monitor? The doorbell is offline for about a minute.

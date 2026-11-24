@@ -123,7 +123,7 @@ the firmware are never modified, and no vendor code is distributed in this repos
 | `tools/vimar.py` | PC helper for Windows / Linux: `serve`, `backup`, `install`, `getkey`, `status` |
 | `build.sh` | builds the three monitor programs into `dist/` (also run by GitHub Actions for the Releases) |
 | `on-device/ssh/` | scripts run on the monitor in step 2: temporary SSH server, make it permanent / undo |
-| `on-device/vimarbridge.c` | door‑bus (UART) ⇄ MQTT bridge: ring, gate, remote answer, call state |
+| `on-device/vimarbridge.c` | door‑bus (UART) ⇄ MQTT bridge: ring, gate, remote answer, call state, reboot button, CPU / memory sensors |
 | `on-device/vimaraudio/` | door audio helper (listen + talk‑back over RTSP) |
 | `on-device/lua-patch/` | tool that patches a copy of the monitor's UI so a phone can watch during a ring |
 | `on-device/keylock/` | tool that patches a copy of the monitor's main program so the video key stays valid |
