@@ -1,6 +1,0 @@
-# The scripts and config files of this kit are run or read on the monitor (Linux).
-# Keep Unix line ends everywhere, also when the kit is checked out on Windows.
-* text=auto eol=lf
-*.png binary
-*.jpg binary
-*.jpeg binary
