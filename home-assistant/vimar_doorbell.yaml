@@ -1,0 +1,418 @@
+# Vimar K40955 doorbell in Home Assistant with the door card (custom:vimar-door-card).
+# One Door view with the card does everything: video, Answer, Hang up, slide to open the gate, "Answered by …".
+# The card reacts to sensor.vimar_k40955_call_state and input_text.vimar_call_owner; no page reloads, no
+# navigation (the old two-view setup with input_buttons and command_webview is replaced, see git history T36-T42).
+# Talk-back needs HTTPS: the phone's WebView only gives the microphone to secure pages. Set the companion app's
+# internal URL to the HTTPS address as well (T36).
+#
+# Rules: first to Answer owns the call (R3); only the owner's Hang up ends
+# it (R4, in the card); the indoor monitor keeps priority (G6).
+#
+# Fill in before use:
+#   PHONES table (in script vimar_notify_clear below): one entry per user,
+#     <user id>: {notify: <notify action without "notify.">, interactive: <Interactive sensor of that phone>}
+#     user id   -> Settings -> People -> Users tab (Advanced mode on in your profile), open the user: "ID"
+#     notify    -> Developer tools -> Actions, search "mobile_app" (e.g. notify.mobile_app_pixel_7 -> mobile_app_pixel_7)
+#     interactive -> enable "Interactive" in Companion app -> Settings -> Manage sensors on each phone
+#   the same Interactive sensors again in the trigger list of "hang up when the phone screen goes off"
+#   camera.vimar_door -> picture for the notification (R1, T56): Settings -> Devices & services -> Add integration ->
+#                     Generic Camera, Still image URL http://<HA IP>:1984/api/frame.jpeg?src=vimar_k40955 (go2rtc),
+#                     no stream source. The integration names the entity after the URL host (camera.192_168_...):
+#                     rename its entity ID to camera.vimar_door. It fetches one frame only when asked (~3 s).
+#   /lovelace/door -> path of the Door view (door_view.yaml). If the view is not on the default dashboard, replace
+#                     /lovelace/ by the dashboard's URL path (e.g. /dashboard-dashboard/), as shown in the address bar
+# 1) PACKAGE: copy to /config/packages/vimar_doorbell.yaml (packages enabled in configuration.yaml), restart HA.
+# 2) CARD: copy vimar-door-card.js to /config/www/ and add it as a dashboard resource (docs/04-home-assistant.md, 4.6).
+# 3) VIEW: door_view.yaml (Edit view -> Edit in YAML, paste); delete the old Door / Door live views.
+# 4) SETTINGS: the cog under the video in door_view.yaml opens the settings pop-up (needs browser_mod).
+
+# ============================== PACKAGE ===================================================================
+input_button:
+  vimar_monitor_priority:
+    name: Vimar - indoor monitor took over (swipe)   # pressed by the webhook below; the card watches it (T57)
+    icon: mdi:monitor-account
+
+input_select:
+  vimar_log_level:
+    name: Vimar - log verbosity
+    icon: mdi:bug
+    options:
+      - INFO
+      - WARNING
+      - ERROR
+      - DEBUG
+
+input_text:
+  vimar_call_owner:
+    name: Vimar - user who answered the HA call
+    max: 64
+  vimar_last_ring:
+    name: Vimar - time of the last ring (DDMMYY_hhmm, also the picture's file name)
+    max: 16
+
+# Settings, shown in the settings pop-up (the cog in door_view.yaml). Set them once after the first restart:
+# a new number starts at its minimum and a new switch starts off.
+input_number:
+  vimar_keep_weeks:
+    name: Vimar - weeks to keep the door pictures
+    min: 1
+    max: 52
+    step: 1
+    mode: box
+    unit_of_measurement: weeks
+    icon: mdi:calendar-clock
+  vimar_notify_minutes:
+    name: Vimar - minutes the ring notification stays
+    min: 1
+    max: 30
+    step: 1
+    mode: box
+    unit_of_measurement: min
+    icon: mdi:bell-ring-outline
+
+input_boolean:
+  vimar_save_pictures:
+    name: Vimar - save a picture at every ring
+    icon: mdi:content-save-outline
+  vimar_video_hq:            # 896x576 instead of 352x288, also for the pictures (automation "video quality")
+    name: Vimar - high quality video
+    icon: mdi:video-high-definition
+
+# Pictures of the callers are kept in /media/vimar/ (login needed to view them) for the number of weeks set
+# in input_number.vimar_keep_weeks (13 if unset); see the clean-up automation at the end.
+shell_command:
+  vimar_clean_pictures: "find /media/vimar -name '*.jpg' -mtime +{{ states('input_number.vimar_keep_weeks') | int(13) * 7 }} -delete"
+
+script:
+  vimar_notify_clear:
+    alias: Vimar - remove the doorbell notification from the phones
+    variables: &phones
+      phones:                                       # PHONES table, used by every script/automation below
+        USER_ID_1: {notify: mobile_app_PHONE_1, interactive: binary_sensor.PHONE_1_interactive}
+        USER_ID_2: {notify: mobile_app_PHONE_2, interactive: binary_sensor.PHONE_2_interactive}
+    sequence:
+      - repeat:
+          for_each: "{{ phones.values() | map(attribute='notify') | list }}"
+          sequence:
+            - action: "notify.{{ repeat.item }}"
+              data: {message: clear_notification, data: {tag: vimar_door}}
+
+  # Called by the save (floppy) button on the card's video: one frame of the running video goes to the
+  # folder of the ring pictures, as DDMMYY_hhmmss.jpg (with seconds, so that it never replaces the ring
+  # picture of the same minute). Works whatever the "save a picture at every ring" switch says.
+  vimar_save_picture:
+    alias: Vimar - save the current door picture (save button on the video)
+    mode: single
+    max_exceeded: silent
+    sequence:
+      - action: camera.snapshot
+        target: {entity_id: camera.vimar_door}
+        data: {filename: "/media/vimar/{{ now().strftime('%d%m%y_%H%M%S') }}.jpg"}
+
+  # Called by the card's Answer button with the id of the logged-in user.
+  vimar_answer:
+    alias: Vimar - answer from HA (remembers who answered)
+    fields:
+      user:
+        description: HA user id of the person answering
+    sequence:
+      - if:                                         # the bridge ignores a second Answer during an HA call and
+          - condition: not                          # refuses one while the monitor holds the call:
+            conditions:                             # then keep the first owner (R3)
+              - condition: state
+                entity_id: sensor.vimar_k40955_call_state
+                state: [answered_HA, answered_monitor]
+        then:
+          - action: input_text.set_value
+            target: {entity_id: input_text.vimar_call_owner}
+            data: {value: "{{ user | default('') }}"}
+      - action: mqtt.publish
+        data: {topic: vimar/k40955/cmd/answer_remote, payload: PRESS}
+
+automation:
+  # R1 (first part): fast notification to all phones, no buttons; tapping it opens the Door view with the card.
+  # The picture follows later.
+  - alias: Vimar - doorbell ring notification
+    id: vimar_ring_notification
+    mode: single
+    max_exceeded: silent
+    variables: *phones
+    triggers:
+      - trigger: mqtt
+        topic: vimar/k40955/event          # one message per ring from the bridge
+    actions:
+      - variables:
+          stamp: "{{ now().strftime('%d%m%y_%H%M') }}"     # DDMMYY_hhmm of this ring
+          save: "{{ is_state('input_boolean.vimar_save_pictures', 'on') }}"
+          stay: "{{ states('input_number.vimar_notify_minutes') | int(1) * 60 }}"   # seconds
+      - action: input_text.set_value
+        target: {entity_id: input_text.vimar_last_ring}
+        data: {value: "{{ stamp }}"}
+      # 1) instant text-only alert, tapping it opens the Door view (card); Answer is in the card
+      - repeat:
+          for_each: "{{ phones.values() | map(attribute='notify') | list }}"
+          sequence:
+            - action: "notify.{{ repeat.item }}"
+              data:
+                title: Doorbell
+                message: Someone at the door
+                data:
+                  tag: vimar_door                # same tag: a new ring replaces the old notification
+                  channel: doorbell              # Android: set this channel's sound/importance once in the app
+                  importance: high
+                  priority: high
+                  ttl: 0
+                  timeout: "{{ stay }}"          # removed after the set minutes if nobody reacts
+                  clickAction: /lovelace/door
+      # 2) save the caller's picture while the outdoor camera is still live, as DDMMYY_hhmm.jpg
+      #    (the live frame is gone once the ring ends - the same file feeds "not answered" below).
+      #    Needs the folder /media/vimar/ and /media in allowlist_external_dirs (see docs/04 4.4).
+      #    With "save a picture at every ring" off nothing is saved: the notification shows a live frame.
+      - if: "{{ save }}"
+        then:
+          - action: camera.snapshot
+            continue_on_error: true
+            target: {entity_id: camera.vimar_door}
+            data: {filename: "/media/vimar/{{ stamp }}.jpg"}
+      # 3) the same notification with the caller's picture (alert_once = no second sound, R1, T56)
+      - repeat:
+          for_each: "{{ phones.values() | map(attribute='notify') | list }}"
+          sequence:
+            - action: "notify.{{ repeat.item }}"
+              data:
+                title: Doorbell
+                message: Someone at the door
+                data:
+                  tag: vimar_door
+                  channel: doorbell
+                  importance: high
+                  priority: high
+                  ttl: 0
+                  timeout: "{{ stay }}"
+                  alert_once: true
+                  image: "{{ '/media/local/vimar/' ~ stamp ~ '.jpg' if save else '/api/camera_proxy/camera.vimar_door' }}"
+                  clickAction: /lovelace/door
+
+  # Somebody answered (a phone or the indoor monitor): the ring notification goes away on every phone.
+  - alias: Vimar - remove the ring notification when the call is answered
+    id: vimar_notify_clear_on_answer
+    triggers:
+      - trigger: state
+        entity_id: sensor.vimar_k40955_call_state
+        to: [answered_HA, answered_monitor]
+    actions:
+      - action: script.vimar_notify_clear
+
+  # R1 (no answer): the ring ended and nobody picked up on the monitor, in HA or in the app
+  # (an answer goes ringing -> answered_*, never ringing -> idle). Replace the ring notification, in
+  # place and with the same saved picture, by a persistent "hh:mm : not answered" with the time of the
+  # ring (stays until dismissed or the next ring). A later answer of a new ring clears it (same tag).
+  - alias: Vimar - "not answered" notification
+    id: vimar_notify_missed
+    mode: single
+    max_exceeded: silent
+    variables: *phones
+    triggers:
+      - trigger: state
+        entity_id: sensor.vimar_k40955_call_state
+        from: ringing
+        to: idle
+    actions:
+      - variables:
+          stamp: "{{ states('input_text.vimar_last_ring') }}"      # DDMMYY_hhmm of that ring
+          text: "{{ stamp[7:9] }}:{{ stamp[9:11] }} : not answered"
+      # no "timeout" below: the notification is not auto-removed. Add persistent: true to also stop it
+      # being swiped away.
+      - repeat:
+          for_each: "{{ phones.values() | map(attribute='notify') | list }}"
+          sequence:
+            - if: "{{ is_state('input_boolean.vimar_save_pictures', 'on') }}"
+              then:
+                - action: "notify.{{ repeat.item }}"
+                  data:
+                    title: Doorbell
+                    message: "{{ text }}"
+                    data:
+                      tag: vimar_door                # replaces the ring notification, keeps its place
+                      channel: doorbell
+                      importance: default            # quiet update, no buzz
+                      alert_once: true               # no new sound
+                      sticky: true                   # stays after it is tapped
+                      image: "/media/local/vimar/{{ stamp }}.jpg"
+                      clickAction: /lovelace/door
+              else:                                  # pictures are not saved: same text, no picture
+                - action: "notify.{{ repeat.item }}"
+                  data:
+                    title: Doorbell
+                    message: "{{ text }}"
+                    data:
+                      tag: vimar_door
+                      channel: doorbell
+                      importance: default
+                      alert_once: true
+                      sticky: true
+                      clickAction: /lovelace/door
+
+  # The HA app keeps the page (stream + microphone) running in the background, so leaving the app does not end
+  # the call. Locking the screen does: the Interactive sensor reports it in 3-5 s (tested 2026-11-08).
+  # Only the phone of the user who answered counts.
+  - alias: Vimar - hang up when the phone screen goes off
+    id: vimar_hangup_screen_off
+    variables: *phones
+    triggers:
+      - trigger: state
+        entity_id:                                  # the Interactive sensors of the PHONES table
+          - binary_sensor.PHONE_1_interactive
+          - binary_sensor.PHONE_2_interactive
+        to: "off"
+        for: {seconds: 3}
+    conditions:
+      - condition: state
+        entity_id: sensor.vimar_k40955_call_state
+        state: answered_HA
+      - condition: template
+        value_template: >-
+          {% set who = states('input_text.vimar_call_owner') %}
+          {{ who in phones and phones[who].interactive == trigger.entity_id }}
+    actions:
+      - action: mqtt.publish
+        data: {topic: vimar/k40955/cmd/end_remote, payload: PRESS}
+
+  # R3 / G6: someone swipes the remote-connection page away on the indoor monitor. The monitor sends a hang-up
+  # notice on the LAN session, quii_lan (--notify) calls this webhook (T57). The cards close their video and do
+  # not autostart for 60 s; a running HA call is ended, the monitor has priority.
+  - alias: Vimar - swipe on the indoor monitor (monitor priority)
+    id: vimar_monitor_swipe
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: webhook
+        webhook_id: vimar_k40955_swipe
+        allowed_methods: [POST]
+        local_only: true
+    actions:
+      - action: input_button.press
+        target: {entity_id: input_button.vimar_monitor_priority}
+      - if:
+          - condition: state
+            entity_id: sensor.vimar_k40955_call_state
+            state: answered_HA
+        then:
+          - action: mqtt.publish
+            data: {topic: vimar/k40955/cmd/end_remote, payload: PRESS}
+
+  # End of an HA call (Hang up, screen off, 2 min limit): forget the owner. The card removes the stream itself.
+  - alias: Vimar - clear the call owner when the HA call ends
+    id: vimar_clear_owner
+    triggers:
+      - trigger: state
+        entity_id: sensor.vimar_k40955_call_state
+        from: answered_HA
+        to: idle
+    actions:
+      - action: input_text.set_value
+        target: {entity_id: input_text.vimar_call_owner}
+        data: {value: ""}
+
+  # Switch "High quality video": the monitor's main program is restarted with the HQ build (896x576, pictures
+  # too) or the normal one (352x288). Takes about 15 s, the monitor's screen restarts and an open video
+  # reconnects by itself. Never during a ring or a call: it waits for idle / viewing (the bridge checks too).
+  # Needs the HQ build on the monitor (tools/vimar.py install, or on-device/install.sh app-hq).
+  # Keep the monitor's REC button on off or picture with HQ on (video recording uses the same stream).
+  - alias: Vimar - video quality
+    id: vimar_video_quality
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.vimar_video_hq
+        to: ["on", "off"]
+      - trigger: homeassistant
+        event: start
+    actions:
+      - wait_template: "{{ states('sensor.vimar_k40955_call_state') in ['idle', 'viewing'] }}"
+        timeout: "00:30:00"
+        continue_on_timeout: false
+      - action: mqtt.publish
+        data:
+          topic: "vimar/k40955/cmd/video_{{ 'hq' if is_state('input_boolean.vimar_video_hq', 'on') else 'std' }}"
+          payload: PRESS
+
+  # Every night delete the callers' pictures older than the set number of weeks.
+  - alias: Vimar - delete old door pictures
+    id: vimar_clean_pictures
+    triggers:
+      - trigger: time
+        at: "03:30:00"
+    actions:
+      - action: shell_command.vimar_clean_pictures
+
+
+  # Central diagnostics: device processes publish one compact JSON record over the existing MQTT connection.
+  - alias: Vimar - collect diagnostic logs
+    id: vimar_collect_diagnostic_logs
+    mode: queued
+    max: 100
+    max_exceeded: silent
+    triggers:
+      - trigger: mqtt
+        topic: vimar/k40955/log
+    conditions:
+      - condition: template
+        value_template: >-
+          {{ trigger.payload_json is defined
+             and trigger.payload_json is mapping
+             and trigger.payload_json.get('component') in ['bridge', 'audio', 'supervisor']
+             and trigger.payload_json.get('level') in ['ERROR', 'WARNING', 'INFO', 'DEBUG'] }}
+    actions:
+      - action: system_log.write
+        data:
+          logger: "vimar.{{ trigger.payload_json.get('component') }}"
+          level: "{{ trigger.payload_json.get('level') | lower }}"
+          message: "{{ trigger.payload_json.get('message', '') }}"
+
+  # Re-publish the retained level after HA starts and whenever the selector changes. The bridge's existing
+  # <base>/cmd/+ subscription receives it; its MQTT child filters every on-device component centrally.
+  - alias: Vimar - set diagnostic verbosity
+    id: vimar_set_diagnostic_verbosity
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: input_select.vimar_log_level
+      - trigger: homeassistant
+        event: start
+    actions:
+      - action: mqtt.publish
+        data:
+          topic: vimar/k40955/cmd/log_level
+          payload: "{{ states('input_select.vimar_log_level') | upper }}"
+          qos: 0
+          retain: true
+
+  # quii_lan.py runs beside go2rtc, not on the monitor, so it forwards camera logs to this local-only webhook.
+  - alias: Vimar - collect camera diagnostics
+    id: vimar_collect_camera_diagnostics
+    mode: queued
+    max: 100
+    max_exceeded: silent
+    triggers:
+      - trigger: webhook
+        webhook_id: vimar_k40955_log
+        allowed_methods: [POST]
+        local_only: true
+    conditions:
+      - condition: template
+        value_template: >-
+          {% set levels = ['ERROR', 'WARNING', 'INFO', 'DEBUG'] %}
+          {% set incoming = trigger.json.get('level', 'INFO') | upper if trigger.json is mapping else '' %}
+          {% set selected = states('input_select.vimar_log_level') | upper %}
+          {{ trigger.json is mapping
+             and trigger.json.get('component') == 'camera'
+             and incoming in levels
+             and selected in levels
+             and levels.index(incoming) <= levels.index(selected) }}
+    actions:
+      - action: system_log.write
+        data:
+          logger: vimar.camera
+          level: "{{ trigger.json.get('level') | lower }}"
+          message: "{{ trigger.json.get('message', '') }}"

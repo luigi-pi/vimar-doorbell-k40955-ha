@@ -1,0 +1,83 @@
+# Door view with the vimar-door-card (T43, in use since T49). Paste with Edit view -> Edit in YAML.
+# Install: docs/04-home-assistant.md (4.6). Package: vimar_doorbell.yaml (notification opens this
+# view: its clickAction path must match this view's path, with the dashboard's URL prefix).
+# Opening the view starts the video in idle / viewing (autostart), which occupies the indoor monitor ("viewing"):
+# do not make it the dashboard's first view. The cog under the video opens the settings pop-up
+# (needs the browser_mod integration from HACS; without it, delete that button). With the B1 Lua patch (T55) the video also runs during a ring.
+# The pop-up also shows diagnostic verbosity, monitor CPU / memory and a Reboot button (confirmation first); if your entity ids differ,
+# check Settings -> Devices -> Vimar K40955 and adjust the five ids at the end of the pop-up.
+title: Doorbell
+path: door
+icon: mdi:doorbell-video
+type: masonry
+cards:
+  - type: vertical-stack
+    cards:
+      - type: custom:vimar-door-card
+        # autostart: true              # video starts when the view is opened (idle / viewing only)
+        autostart_ringing: true        # video during the ring; needs the B1 Lua patch on the monitor (T54/T55,
+        #                              # boot.sh). Without it: false (a viewer during a ring makes mainapp stand down, T48)
+        # defaults, change only if your names differ:
+        # stream: vimar_k40955
+        # call_state: sensor.vimar_k40955_call_state
+        # owner: input_text.vimar_call_owner
+        # answer_script: vimar_answer
+        # topic: vimar/k40955/cmd
+      - type: button
+        icon: mdi:cog-outline
+        icon_height: 40px
+        show_icon: true
+        show_name: false
+        tap_action:
+          action: fire-dom-event
+          browser_mod:
+            service: browser_mod.popup
+            data:
+              size: small
+              content:
+                type: vertical-stack
+                cards:
+                  - type: entities
+                    title: Doorbell settings
+                    show_header_toggle: false
+                    entities:
+                      - entity: input_boolean.vimar_save_pictures
+                        name: Save a picture at every ring
+                      - entity: input_number.vimar_keep_weeks
+                        name: Keep pictures for (weeks)
+                      - type: button
+                        name: Saved pictures
+                        icon: mdi:folder-image
+                        action_name: Open
+                        tap_action:
+                          action: navigate
+                          # Media -> Local media -> vimar. If it opens the wrong place, browse to the folder
+                          # once and paste here the part of the address after the host name.
+                          navigation_path: /media-browser/browser/app%2Cmedia-source%3A%2F%2Fmedia_source%2Flocal%2Fvimar
+                      - entity: input_number.vimar_notify_minutes
+                        name: Ring notification stays (minutes)
+                      - entity: input_boolean.vimar_video_hq
+                        name: High quality video and pictures (~15 s to switch)
+                      - entity: input_select.vimar_log_level
+                        name: Diagnostic log verbosity
+                      - type: section
+                        label: Monitor
+                      - entity: sensor.vimar_k40955_cpu_usage
+                        name: CPU usage
+                      - entity: sensor.vimar_k40955_cpu_load_1_min
+                        name: CPU load (1 min)
+                      - entity: sensor.vimar_k40955_memory_used
+                        name: Memory used
+                      - entity: sensor.vimar_k40955_memory_available
+                        name: Memory available
+                      - type: button
+                        name: Reboot monitor
+                        icon: mdi:restart-alert
+                        action_name: Reboot
+                        tap_action:
+                          action: perform-action
+                          perform_action: button.press
+                          target:
+                            entity_id: button.vimar_k40955_reboot_monitor
+                          confirmation:
+                            text: Reboot the indoor monitor? The doorbell is offline for about a minute.
