@@ -6,15 +6,22 @@
  * call of the logged-in user starts. Hang up / end of that call removes it again (the WebRTC card then closes
  * the stream and releases the microphone after its own 5 s disconnect delay); it stays off until the placeholder
  * is tapped or the view is opened again.
+ * App in the background / screen off / tab hidden: the video is closed at once, in the visibilitychange handler.
+ * The WebRTC card does the same after a 5 s timer, but the Android app freezes the WebView's timers
+ * (WebView.pauseTimers) while it is in the background: that timer never ran, the go2rtc consumer and the
+ * microphone stayed on until the app was force-stopped. A call this phone holds is left alone (screen-off
+ * hang-up and the 120 s limit still apply) unless hidden_ends_call is set.
  * While the video is shown the indoor monitor is in use ("viewing"): with autostart do not make this view the
  * first view of the dashboard.
  *
  * Runs in the browser only: no backend component, no polling, no timers. It only reacts to state updates HA
- * already sends to the dashboard. It sends the same commands as the two views did:
+ * already sends to the dashboard and to the page's visibility. It sends the same commands as the two views did:
  *   Answer    -> script.vimar_answer {user: <id of the logged-in user>}
  *   Hang up   -> mqtt.publish <topic>/end_remote, except in state viewing/idle (T38: no "41" while mainapp's
  *                live session is still open)
  *   Open gate -> mqtt.publish <topic>/open_gate
+ * Log: opening / closing of the video, with the reason, goes to Home Assistant's log as logger vimar.card (system_log.write),
+ * filtered by the same verbosity selector as the other Vimar components (input_select.vimar_log_level).
  *
  * Install: copy this file to /config/www/, add the dashboard resource /local/vimar-door-card.js (JavaScript
  * module), then use the card:
@@ -38,7 +45,21 @@ export const DEFAULTS = {
   autostart_ringing: false,                         // also during a ring. mainapp treats a live session opened
                                                     // during a ring as an app answer (T41): only with the T41
                                                     // bridge installed (Answer then takes the call over)
+  hidden_ends_call: false,                          // page hidden during a call THIS phone holds: false = the video
+                                                    // stays (screen-off hang-up / 120 s limit apply), true = Hang up
+  log: true,                                        // write to the HA log (logger vimar.card)
+  log_level: 'input_select.vimar_log_level',        // verbosity selector shared with the other Vimar components
 };
+
+const LOG_LEVELS = ['ERROR', 'WARNING', 'INFO', 'DEBUG'];
+
+/** Is a message of this level written, given the selector's state? Unknown / unavailable selector: INFO. */
+export function logAllowed(level, selected) {
+  const want = LOG_LEVELS.indexOf(level);
+  let have = LOG_LEVELS.indexOf(String(selected || '').toUpperCase());
+  if (have < 0) have = LOG_LEVELS.indexOf('INFO');
+  return want >= 0 && want <= have;
+}
 
 /* ---- logic (no DOM; tested with node, test/logic_test.mjs) --------------------------------------------- */
 
@@ -162,16 +183,66 @@ if (typeof customElements !== 'undefined' && !customElements.get('vimar-door-car
 
     connectedCallback() {
       if (!this.shadowRoot) { this.attachShadow({mode: 'open'}); this._build(); }
+      if (!this._onVis) this._onVis = () => this._visibility();
+      document.addEventListener('visibilitychange', this._onVis);
       this._auto = true;
       if (this._hass) this._update();
     }
 
     disconnectedCallback() {                 // view left: stop the stream; re-check the call state on return
+      document.removeEventListener('visibilitychange', this._onVis);
+      if (this._m.live) this._closed('view left');
       this._m = {live: false, myCall: false};
       this._key = '';
       this._auto = false;
       this._show();
     }
+
+    /** Page hidden / visible (app to the background, screen off, tab switch). */
+    _visibility() {
+      const hidden = document.visibilityState === 'hidden';
+      if (!hidden) { this._log('DEBUG', 'page visible again, video ' + (this._m.live ? 'open' : 'closed')); return; }
+      if (!this._m.live) { this._log('DEBUG', 'page hidden, no video open'); return; }
+      if (this._m.myCall && !this._cfg.hidden_ends_call) {
+        this._log('INFO', 'page hidden during my HA call: video kept (hidden_ends_call is off; the screen-off ' +
+          'hang-up and the 120 s limit still end the call)');
+        return;
+      }
+      if (this._m.myCall) { this._hangup('page hidden'); return; }   // hidden_ends_call: same as the Hang up button
+      // Close the media NOW, inside the event. Not through the WebRTC card's own 5 s timer: the Android app
+      // pauses the WebView's timers while it is in the background (WebView.pauseTimers), so that timer would not
+      // run until the app is opened again, and the go2rtc consumer and the microphone would stay on.
+      try {
+        if (this._cam && typeof this._cam.ondisconnect === 'function') this._cam.ondisconnect();
+      } catch (e) {
+        this._log('WARNING', 'closing the stream on page hidden failed: ' + (e && e.message));
+      }
+      this._closed('page hidden (app in the background, screen off or tab hidden)');
+      this._m = {live: false, myCall: this._m.myCall};
+      this._key = '';
+      this._update();
+    }
+
+    /** Write one line to the HA log (logger vimar.card), if the selector allows its level. Never throws. */
+    _log(level, msg) {
+      try {
+        if (!this._cfg.log || !this._hass || !this._hass.callService) return;
+        const sel = this._hass.states[this._cfg.log_level];
+        if (!logAllowed(level, sel && sel.state)) return;
+        const d = new Date(), pad = (n, w = 2) => String(n).padStart(w, '0');
+        const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+        const who = (this._hass.user && this._hass.user.name) || '?';
+        const app = /HomeAssistant/i.test(navigator.userAgent || '') ? 'app' : 'browser';
+        // the phone's clock and the page's visibility are in the text: system_log stamps the time HA received it
+        // (late, if the app was frozen), so the two show whether the event reached HA when it happened
+        const p = this._hass.callService('system_log', 'write',
+          {logger: 'vimar.card', level: level.toLowerCase(), message: `[${who}/${app} ${clock} ${document.visibilityState}] ${msg}`});
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (e) { /* logging must never break the card */ }
+    }
+
+    _opened(why) { this._log('INFO', 'video opened: ' + why); }
+    _closed(why) { this._log('INFO', 'video closed: ' + why); }
 
     set hass(hass) {
       this._hass = hass;
@@ -243,19 +314,36 @@ if (typeof customElements !== 'undefined' && !customElements.get('vimar-door-car
       const prio = this._prio();
       if (this._prioSeen !== undefined && prio !== this._prioSeen && this._m.live) {
         this._m = {live: false, myCall: false};  // T57: swipe on the monitor: it has priority (R3, G6)
+        this._closed('swipe on the indoor monitor (it has priority)');
       }
       this._prioSeen = prio;
       if (this._auto) {                        // first update after the view was opened
         this._auto = false;
-        if (autoStartAllowed(this._cfg, st) && !priorityRecent(prio, Date.now())) this._m = {live: true, myCall: this._m.myCall};
+        if (autoStartAllowed(this._cfg, st) && !priorityRecent(prio, Date.now())) {
+          this._m = {live: true, myCall: this._m.myCall};
+          this._opened('view opened (autostart), call state ' + st);
+        } else {
+          this._log('DEBUG', `view opened, no autostart (call state ${st}, autostart ${this._cfg.autostart}, ` +
+            `monitor priority ${priorityRecent(prio, Date.now()) ? 'recent' : 'not recent'})`);
+        }
       }
       // T56: a ring that ends unanswered (ringing / answered_app -> idle) leaves the outdoor camera off while the
       // LAN session stays open: black video for as long as the view stays open. Close it like the monitor does.
       if (this._m.live && !this._m.myCall && st === 'idle' && (this._prevSt === 'ringing' || this._prevSt === 'answered_app')) {
         this._m = {live: false, myCall: false};
+        this._closed(`ring ended unanswered (${this._prevSt} -> idle): the outdoor camera is off`);
       }
+      if (this._prevSt !== st) this._log('DEBUG', `call state ${this._prevSt || '?'} -> ${st}, owner '${owner}'`);
       this._prevSt = st;
+      const before = this._m;
       this._m = onState(this._m, st, owner, this._me(), !!this._cfg.autostart_ringing);
+      if (!before.live && this._m.live) this._opened(`my HA call started (${st})`);
+      if (before.live && !this._m.live) {
+        this._closed(before.myCall ? `my HA call ended (${st})`
+          : st === 'ringing' ? 'a ring started while this phone only watched (video after Answer)'
+          : st === 'answered_monitor' ? 'answered at the indoor unit'
+          : `answered by another device (${st})`);
+      }
       const key = st + '|' + owner + '|' + this._m.live;
       if (key === this._key) return;
       this._key = key;
@@ -329,7 +417,11 @@ if (typeof customElements !== 'undefined' && !customElements.get('vimar-door-car
     }
 
     _start() {
-      if (!startAllowed(this._cfg, this._state())) return;
+      if (!startAllowed(this._cfg, this._state())) {
+        this._log('DEBUG', 'Start video tapped but not allowed in call state ' + this._state());
+        return;
+      }
+      this._opened('Start video tapped, call state ' + this._state());
       this._m = {live: true, myCall: this._m.myCall};
       this._key = '';
       this._update();
@@ -343,10 +435,12 @@ if (typeof customElements !== 'undefined' && !customElements.get('vimar-door-car
       this._hass.callService('script', this._cfg.answer_script, {user: this._me()});
     }
 
-    _hangup() {
-      if (hangupPublishes(this._state(), this._owner(), this._me(), this._m.myCall)) {
+    _hangup(why) {
+      const ends = hangupPublishes(this._state(), this._owner(), this._me(), this._m.myCall);
+      if (ends) {
         this._hass.callService('mqtt', 'publish', {topic: this._cfg.topic + '/end_remote', payload: 'PRESS'});
       }
+      this._closed(`${typeof why === 'string' ? why : 'button'}: ${ends ? 'Hang up, end_remote published' : 'video closed, the call goes on'}`);
       this._m = {live: false, myCall: this._m.myCall};
       this._key = '';
       this._update();
