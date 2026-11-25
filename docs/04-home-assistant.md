@@ -68,6 +68,14 @@ Merge [`go2rtc.example.yaml`](../home-assistant/go2rtc.example.yaml) into `/conf
 the file if it does not exist) and fill in the two addresses, then restart Home Assistant. The
 `--notify` webhook is what lets the **indoor monitor take the call back** when you swipe it.
 
+The exec line ends with `#killsignal=15#killtimeout=2`. Without it go2rtc stops the relay with SIGKILL when
+the last viewer leaves, so the relay cannot log why it ended and closes its socket to the monitor only
+because the kernel does it. With it go2rtc sends SIGTERM and `quii_lan.py` logs `session end: go2rtc stopped
+the producer (SIGTERM): the last viewer left`, flushes its pending log messages (at most 1 s) and closes the
+connection itself; SIGKILL follows after 2 s if it hangs. This changes what is logged, not how the monitor sees
+the end of the session (a normal TCP close either way). To see go2rtc's own side add `log: exec: debug`
+(`[exec] kill with signal=15`).
+
 ## 4.4 Snapshot camera
 
 Settings → Devices & services → **Add integration → Generic Camera**:
@@ -140,6 +148,22 @@ logger:
 
 The messages appear under **Settings → System → Logs → Home Assistant → Show raw logs**. The condensed view stores warnings and errors only; use **Show raw logs** for INFO and DEBUG. The selector's state is restored by Home Assistant and republished when Home Assistant starts. Keep DEBUG on only while diagnosing a problem.
 
+**What each source logs** (all appear under the logger names below):
+
+| Logger | Source | Lines worth knowing |
+|---|---|---|
+| `vimar.camera` | `quii_lan.py` (webhook) | `start …` (pid, parent pid, notify/log-webhook), `play accepted after X s`, `session end: <reason>; ran X s, N frames`, camera-off restart and its 60 s suppression, hang-up notice from the monitor, `waited X s for the previous session` |
+| `vimar.card` | `vimar-door-card.js` (`system_log.write`) | `[user/app\|browser HH:MM:SS.mmm visible\|hidden] video opened: <why>`, `video closed: <why>`, `page hidden …`, `Hang up …`, call-state transitions (DEBUG) |
+| `vimar.bridge` | `vimarbridge.c` (MQTT) | state changes, `mainapp: live session opened (40)` / `closed (41) after N s[, held back …]` |
+
+`quii_lan.py` also writes the same lines, with millisecond time stamps and its pid, to its `--log` file, which is
+the only copy when Home Assistant is down or slow (the first failed webhook post is noted there once; the
+`session end` line carries the count of lost messages). Messages of one relay run share the `[pid]` prefix, so
+a restart loop is easy to see.
+
+`vimar.card` lines are sent only while the log selector allows their level (the same selector as above; a missing
+selector means INFO). Set `log: false` in the card configuration to stop them.
+
 The camera webhook is `vimar_k40955_log` and is restricted to local requests. Keep the go2rtc exec source on the same trusted LAN as Home Assistant; do not expose this webhook externally.
 
 ## 4.6 The door card and view
@@ -154,6 +178,18 @@ Answer / Hang up.
 
 > Keep this out of your dashboard's **first** view: opening it starts the video, which occupies the
 > indoor monitor while it streams.
+
+**Background and screen off.** When the page becomes hidden (app in the background, screen off, browser tab
+hidden) the card closes the video and releases the microphone at once, and logs `video closed: page hidden`.
+It does not use the stock card's 5 s timer: the Android app freezes page timers in the background
+(`WebView.pauseTimers`), so a timer never fires there, while the `visibilitychange` event is still delivered.
+go2rtc notices the closed WebRTC connection after about 5–6 s and then stops the relay (see 4.3). When the
+page is visible again the card shows **Start video**; it does not reconnect by itself, because that would
+open a new session on the indoor monitor each time you unlock the phone.
+
+If **you** own an HA call (you answered from HA) the video is kept in the background by default, as before: the
+screen-off automation (4.7, *Interactive* sensor) and the 120 s limit end the call. To close the video and end
+the call as soon as the page is hidden, set `hidden_ends_call: true` in the card configuration.
 
 ## 4.7 Companion app settings (Android)
 
@@ -219,3 +255,5 @@ K40955* and adjust the ids at the end of the pop-up in `door_view.yaml`.
 | No video, log says *wrong key* | fetch the stream key again (4.2); is the key lock active (3.4)? |
 | Video works, no door audio / no talk‑back | `vimaraudio started` in the status (3.4); HTTPS internal URL and Autoplay (4.7) |
 | The indoor monitor says *device occupied* | a phone or dashboard is showing the video; close it (see the note in 4.6) |
+| The video keeps running with the phone locked | look for `vimar.card … page hidden` in the logs; none means the app did not deliver `visibilitychange` (note the app version); `hidden_ends_call` (4.6); the go2rtc line in 4.3 |
+| The indoor monitor's screen is interrupted every few minutes | a stale viewer keeps the relay alive: every relay restart opens a new session on the monitor. Look at `session end:` lines and their `ran … s` |
