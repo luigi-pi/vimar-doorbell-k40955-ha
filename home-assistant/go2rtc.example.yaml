@@ -1,13 +1,18 @@
 # go2rtc stream for the K40955. Merge into your go2rtc.yaml (WebRTC Camera add-on / integration).
 # Replace <MONITOR_IP> and <HA_IP>. Keep each exec: line on ONE line.
+#
+# "#killsignal=15#killtimeout=2" at the end of the video line: when the last viewer leaves, go2rtc stops the relay
+# with SIGTERM instead of its default SIGKILL (go2rtc 1.9.x). The relay then logs why it ended ("session end: ..."),
+# closes the monitor session itself and sends its last log lines to HA; after 2 s go2rtc kills it anyway.
+# Without it the relay is killed silently and the log shows no reason.
 
 streams:
   vimar_k40955:
     # video: on-demand LAN relay (runs only while someone watches)
-    - exec:python3 /config/vimar/quii_lan.py <MONITOR_IP> /config/vimar/stream_credentials.json --notify http://<HA_IP>:8123/api/webhook/vimar_k40955_swipe --log-webhook http://<HA_IP>:8123/api/webhook/vimar_k40955_log --log /config/vimar/quii_lan.log
+    - exec:python3 /config/vimar/quii_lan.py <MONITOR_IP> /config/vimar/stream_credentials.json --notify http://<HA_IP>:8123/api/webhook/vimar_k40955_swipe --log-webhook http://<HA_IP>:8123/api/webhook/vimar_k40955_log --log /config/vimar/quii_lan.log#killsignal=15#killtimeout=2
     # audio: door microphone + talk-back (vimaraudio on the monitor)
     - rtsp://<MONITOR_IP>:8554/k40955
 
-# optional, for debugging the relay:
+# optional, for debugging the relay (shows "[exec] kill with signal=15" when a viewer leaves):
 # log:
 #   exec: debug

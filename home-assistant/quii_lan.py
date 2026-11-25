@@ -22,8 +22,13 @@ usage: quii_lan.py <monitor ip> <stream_credentials.json> [--channel 1] [--strea
                 swipes the remote-connection page away on the indoor monitor (T57); the monitor closes the
                 session 10 s later by itself (T46)
   --log-webhook URL: asynchronously send structured camera diagnostics to a local HA webhook
+
+Stopping: when the last viewer leaves, go2rtc stops this process. By default that is SIGKILL (no log, no clean
+close). Add "#killsignal=15#killtimeout=2" at the end of the exec: line (go2rtc >= 1.9.x) and go2rtc sends SIGTERM
+instead: the relay then logs why it ended ("session end: ..."), closes the monitor session and sends its last log
+lines to HA; after 2 s go2rtc still kills it.
 """
-import fcntl, hashlib, json, os, queue, socket, struct, sys, tempfile, threading, time, urllib.request
+import fcntl, hashlib, json, os, queue, signal, socket, struct, sys, tempfile, threading, time, urllib.request
 
 Cipher = algorithms = modes = None         # imported in main() after the log is set up, so a missing module is logged
 
@@ -38,6 +43,24 @@ CAMERA_OFF_RETRY_S = 60      # end a camera-off session at most once per minute 
 
 _log_queue = None
 _log_webhook_url = None
+_log_stats = {"sent": 0, "failed": 0, "dropped": 0}
+_log_failure_reported = False
+# what the "session end" line reports; filled in while the session runs
+_session = {"t0": time.monotonic(), "frames": 0, "playing": False, "reason": None, "hangup_notice": False}
+
+
+def _stamp():
+    t = time.time()
+    return time.strftime("%H:%M:%S", time.localtime(t)) + f".{int(t * 1000) % 1000:03d}"
+
+
+def _write_line(text):
+    """One line in the log file / stderr: time (to the ms), process id (the relay restarts often), text."""
+    try:
+        sys.stderr.write(f"{_stamp()} quii_lan[{os.getpid()}]: {text}\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
 
 
 def configure_log_webhook(url):
@@ -49,6 +72,7 @@ def configure_log_webhook(url):
     _log_webhook_url = url
 
     def sender():
+        global _log_failure_reported
         while True:
             item = _log_queue.get()
             try:
@@ -57,24 +81,49 @@ def configure_log_webhook(url):
                     _log_webhook_url, data=body,
                     headers={"Content-Type": "application/json"}, method="POST")
                 urllib.request.urlopen(req, timeout=1).close()
-            except Exception:
-                # Do not recursively log webhook failures or block video for diagnostics.
-                pass
+                _log_stats["sent"] += 1
+            except Exception as e:
+                # Never block the video or feed the queue with its own failures: count them, say so once in the
+                # file, and report the totals in the "session end" line.
+                _log_stats["failed"] += 1
+                if not _log_failure_reported:
+                    _log_failure_reported = True
+                    _write_line(f"log webhook: cannot reach HA ({type(e).__name__}: {e}); "
+                                "further failures are only counted")
             finally:
                 _log_queue.task_done()
 
     threading.Thread(target=sender, name="vimar-log-webhook", daemon=True).start()
 
 
+def flush_log_webhook(timeout=1.0):
+    """Give the sender a moment to deliver the last lines (the reason the session ended) before the process exits.
+    Bounded: go2rtc's #killtimeout is 2 s."""
+    if _log_queue is None:
+        return
+    end = time.monotonic() + timeout
+    while _log_queue.unfinished_tasks and time.monotonic() < end:
+        time.sleep(0.02)
+    if _log_queue.unfinished_tasks:
+        _write_line(f"log webhook: {_log_queue.unfinished_tasks} message(s) not delivered before exit")
+
+
 def log(msg, level="INFO"):
     text = str(msg)
-    sys.stderr.write(f"quii_lan: {text}\n")
-    sys.stderr.flush()
+    _write_line(text)
     if _log_queue is not None:
         try:
-            _log_queue.put_nowait({"component": "camera", "level": level, "message": text})
+            _log_queue.put_nowait({"component": "camera", "level": level, "message": f"[{os.getpid()}] {text}"})
         except queue.Full:
-            pass
+            _log_stats["dropped"] += 1
+
+
+def stop_from_go2rtc(signum, frame):
+    """go2rtc stops an exec producer with the signal given by #killsignal=... (default SIGKILL, which cannot be
+    caught). Only record the reason and unwind here: logging from a signal handler could deadlock on the log
+    queue's lock if the signal arrived inside log(). main() reports it."""
+    _session["reason"] = f"go2rtc stopped the producer ({signal.Signals(signum).name}): the last viewer left"
+    raise SystemExit(0)
 
 
 def aes(data, key, decrypt):
@@ -205,14 +254,19 @@ def single_instance(host):
     A second copy (e.g. go2rtc's probe and play starting together) waits for the first to finish."""
     path = os.path.join(tempfile.gettempdir(), f"quii_lan_{host}.lock")
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
-    end = time.monotonic() + LOCK_WAIT_S
+    t_wait = time.monotonic()
+    end = t_wait + LOCK_WAIT_S
     while True:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            waited = time.monotonic() - t_wait
+            if waited >= 0.3:
+                log(f"waited {waited:.1f} s for the previous session to this monitor to end")
             return fd                                   # held until the process exits
         except BlockingIOError:
             if time.monotonic() > end:
-                log("another session to this monitor is still running, giving up", "WARNING")
+                _session["reason"] = "another session to this monitor was still running"
+                log(f"another session to this monitor is still running after {LOCK_WAIT_S:.0f} s, giving up", "WARNING")
                 sys.exit(1)
             time.sleep(0.2)
 
@@ -238,6 +292,7 @@ def run(host, cred_path, channel, stream, notify_url=None):
     password = auth if len(auth) >= 64 else hashlib.sha256(auth.encode("utf-8")).hexdigest()
 
     single_instance(host)
+    t_conn = time.monotonic()
     sock = _sock = socket.create_connection((host, 34567), timeout=15)
     sock.settimeout(15)
     sock.sendall(b"\xA9" + b"\0" * 31)                                  # setup
@@ -255,6 +310,7 @@ def run(host, cred_path, channel, stream, notify_url=None):
     frames = CFrames()
     playing, last_ka, sent = False, time.monotonic(), 0
     t0, win_bytes, win_keys = time.monotonic(), 0, 0
+    camoff_noted = False
     while True:
         if playing and time.monotonic() - last_ka >= KEEPALIVE_S:
             sock.sendall(packet(key, b"", 0x00))
@@ -271,7 +327,8 @@ def run(host, cred_path, channel, stream, notify_url=None):
             if size % 16:
                 sys.exit("quii_lan: bad command length - wrong key?")
             if ptype == 0xFE and h[13] == 1:            # transparent transfer type 1 = HangupAllPhone (T46)
-                log("hang-up notice from the monitor (swipe on its remote-connection page)")
+                log("hang-up notice from the monitor (swipe on its remote-connection page): it closes the session ~10 s later (T46)")
+                _session["hangup_notice"] = True
                 if notify_url:
                     notify(notify_url)
                     notify_url = None                   # once per session
@@ -280,7 +337,8 @@ def run(host, cred_path, channel, stream, notify_url=None):
                 if h[11] != 0:
                     sys.exit(f"quii_lan: play rejected (status {h[11]})")
                 if not playing:
-                    log("play accepted")
+                    log(f"play accepted after {time.monotonic() - t_conn:.1f} s")
+                    _session["playing"] = True
                 playing = True
             continue
         if h[15] != 0:
@@ -299,16 +357,24 @@ def run(host, cred_path, channel, stream, notify_url=None):
                     f"payload starts {payload[:8].hex(' ')}", "DEBUG")
             out.write(nal)
             sent += 1
+            _session["frames"] = sent
             win_bytes += len(nal)
             win_keys += is_key
             if sent % 100 == 0:   # ~5 s; average below ~200 bytes = uniform (black) picture
                 log(f"{sent} frames, last 100: avg {win_bytes // 100} bytes, {win_keys} keyframes", "DEBUG")
-                if win_bytes // 100 < CAMERA_OFF_AVG and camera_off_retry_allowed(host):
-                    # the outdoor camera went off under an open session (unanswered ring, monitor hang-up, ...):
-                    # end it; if someone still watches, go2rtc reconnects and the new session's 40 01 switches
-                    # the camera on again (T58)
-                    log("camera off (black picture): ending the session", "WARNING")
-                    sys.exit(1)
+                if win_bytes // 100 < CAMERA_OFF_AVG:
+                    if camera_off_retry_allowed(host):
+                        # the outdoor camera went off under an open session (unanswered ring, monitor hang-up, ...):
+                        # end it; if someone still watches, go2rtc reconnects and the new session's 40 01 switches
+                        # the camera on again (T58)
+                        _session["reason"] = "camera off (black picture)"
+                        log(f"camera off (black picture, {win_bytes // 100} bytes/frame): ending the session so that "
+                            "go2rtc reconnects and wakes the camera (if anyone still watches)", "WARNING")
+                        sys.exit(1)
+                    elif not camoff_noted:
+                        camoff_noted = True               # once per session: this check repeats every ~5 s
+                        log(f"camera off (black picture, {win_bytes // 100} bytes/frame) but the last camera-off "
+                            f"restart was less than {CAMERA_OFF_RETRY_S} s ago: keeping this session")
                 win_bytes, win_keys = 0, 0
         out.flush()
 
@@ -341,10 +407,13 @@ def main():
         except OSError as e:
             log(f"cannot open log file {log_file}: {e}", "WARNING")
     configure_log_webhook(log_webhook_url)
+    signal.signal(signal.SIGTERM, stop_from_go2rtc)             # go2rtc with #killsignal=15; see the docstring
 
     if len(args) != 2:
         sys.exit(__doc__)
-    log(f"start {time.strftime('%Y-%m-%d %H:%M:%S')} Python {sys.version.split()[0]} at {sys.executable}")
+    log(f"start {time.strftime('%Y-%m-%d %H:%M:%S')} Python {sys.version.split()[0]} at {sys.executable}, "
+        f"parent pid {os.getppid()}, notify={'on' if notify_url else 'off'}, "
+        f"log-webhook={'on' if log_webhook_url else 'off'}")
 
     global Cipher, algorithms, modes
     try:
@@ -354,27 +423,40 @@ def main():
         sys.exit(1)
     try:
         run(args[0], args[1], channel, stream, notify_url)
-    except BrokenPipeError:                                     # go2rtc stopped reading: viewer gone
-        log("stdout closed by go2rtc (viewer gone), exit")
+    except BrokenPipeError:                                     # go2rtc closed the pipe before it signalled us
+        _session["reason"] = _session["reason"] or "stdout pipe closed by go2rtc (viewer gone)"
     except KeyboardInterrupt:
-        pass
+        _session["reason"] = _session["reason"] or "interrupted"
     except (OSError, ConnectionError) as e:
-        log(f"error: {e}", "ERROR")
+        extra = " (after the hang-up notice: the monitor ends the session 10 s later)" if _session["hangup_notice"] else ""
+        _session["reason"] = f"{e}{extra}"
+        log(f"error: {e}{extra}", "ERROR")
         sys.exit(1)
     except SystemExit as e:
         if isinstance(e.code, str) and e.code:
+            _session["reason"] = _session["reason"] or e.code
             log(f"exit: {e.code}", "ERROR")
         raise
     except Exception as e:                                      # anything unexpected: keep it in the log
+        _session["reason"] = f"error: {type(e).__name__}: {e}"
         log(f"error: {type(e).__name__}: {e}", "ERROR")
         raise
     finally:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)           # a second signal must not cut the clean-up short
+        s = _session
+        lost = _log_stats["dropped"] + _log_stats["failed"]
+        log(f"session end: {s['reason'] or 'unknown'}; ran {time.monotonic() - s['t0']:.1f} s, {s['frames']} frames"
+            f"{'' if s['playing'] else ', never reached play'}"
+            + (f"; log webhook lost {lost} message(s) ({_log_stats['dropped']} queue full, "
+               f"{_log_stats['failed']} send failed: HA down or slow)" if lost else ""),
+            "INFO")
         if _sock is not None:                                   # close the monitor session explicitly
             try:
                 _sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
             _sock.close()
+        flush_log_webhook(1.0)                                  # the line above is the one that explains the restart
         try:
             sys.stdout.close()
         except Exception:
