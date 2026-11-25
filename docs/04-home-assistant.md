@@ -247,6 +247,45 @@ K40955* and adjust the ids at the end of the pop-up in `door_view.yaml`.
 - If the Lua patch was skipped in step 3 (other firmware), set `autostart_ringing: false` in the
   door view: starting the video during a ring would then answer the call.
 
+## Open points
+
+### Audio from the phone to the door does not always work
+
+**Status:** open, not fixed. Listening at the door is not affected.
+
+**Symptom.** After answering from Home Assistant the door audio plays, but what you say on the phone is not
+heard at the door. The camera and ring are fine. Seen once so far (2026-11-25); whether it happens on every
+answer or only some is not yet known.
+
+**What the logs show** (`vimar.audio`, with the log selector on DEBUG), right after `relay: mainapp stood down, audio on`:
+
+```
+AI active: 8000 Hz, 16-bit, 320 samples/frame, 30 frames; AO available (not enabled until backchannel SETUP)
+AO attr read: rate=16000 bits=16 mode=3 samples=640 frames=30; provisional slot=1280 bytes
+WARNING AO slot header unexpected: seq=0 bits=16 mode=3 (attr bits=16 mode=3); disabling talkback
+WARNING AO talkback disabled: cannot prime first AO slot
+stats 2s: door_frames=50 ... ao_slots=0 bc_bytes=0 ... rx_pkts ch2=16 (talk-back expected on ch2)
+```
+
+- The microphone packets from the phone arrive at the helper (`ch2=16` per 2 s) but nothing is played
+  (`ao_slots=0`, `bc_bytes=0`): the helper switched talk-back off for the rest of the call.
+- The check that fails is the slot's sequence number (`seq == 0` in `ao_write_slot`, `on-device/vimaraudio/vimaraudio.c`).
+  Bits and mode of the slot match the attributes, so the slot format is right.
+- The slot was requested about 14 ms after `AO_ENABLE` (`AI active` line to the warning).
+
+**Likely cause (unverified).** A race: the first output slot is read before the driver has set its sequence
+number, and the helper does not retry. Not confirmed on the device.
+
+**Not caused by** the background-video change (the audio helper was not modified by it); the new logging only
+makes the failure visible.
+
+**To do**
+1. Find out whether it happens on every answer or intermittently (answer several times and compare the `vimar.audio` lines).
+2. If it is the race: in `ao_enable_and_prime`, read the first slot again a few times (about 10 ms apart) before
+   treating `seq == 0` as a fault, then log how many tries it took.
+3. Rebuild `dist/vimaraudio`, install it (`vimar.py install`) and reboot the monitor, then repeat the test.
+4. Check whether the fault flag is cleared for the next call, or whether talk-back stays off until the helper restarts.
+
 ## If something does not work
 
 | Problem | Look at |

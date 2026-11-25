@@ -16,7 +16,7 @@ and relay run on the (rooted) monitor and hand the media straight to Home Assist
 ## What works
 
 - **Live video** from the outdoor camera in Home Assistant (RTSP/WebRTC, 352×288).
-- **Two‑way audio**: listen at the door and talk back from your phone.
+- **Two‑way audio**: listen at the door and talk back from your phone. Talk‑back is not always working yet, see [open points](docs/04-home-assistant.md#open-points).
 - **Doorbell ring** as an instant HA notification, **with a snapshot** of the caller, and as a call‑state
   sensor you can automate on.
 - **Open the gate / door** from Home Assistant.
