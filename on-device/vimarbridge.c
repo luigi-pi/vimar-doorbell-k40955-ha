@@ -284,6 +284,7 @@ int main(int argc, char **argv)
     long ring_start = 0;                       /* start of the current ring (takeover lock, T48) */
     int ring_viewer = 0;                       /* mainapp sent 40 during this ring (LAN viewer or cloud app) */
     int live_open = 0;                         /* mainapp has a LAN/app live session: its 40 seen, its 41 not yet (T41) */
+    long live_t0 = 0;                          /* when that live session opened (log only) */
     long rearm_at = 0;                         /* send 43 01 again: mainapp's 40 cut the door->monitor audio (T41) */
     long app_at = 0;                           /* answered_app since (safety timeout, T41) */
     char pcmd = 0;                             /* HA command waiting for the 1 s injection spacing */                        /* fake 12 02 sent: mainapp's DEVtalkState is 1 (T29) */
@@ -378,8 +379,19 @@ int main(int argc, char **argv)
                     }
                     int drop = remote_until && (gkb[2] == 0x15 || gkb[2] == 0x32 || gkb[2] == 0x41 || gkb[2] == 0x43);
                     if (await17 && gkb[2] == 0x17) { await17 = 0; audio_at = now_ms() + 300; }  /* ringtone stopped */
-                    if (gkb[2] == 0x40) live_open = 1;
-                    if (gkb[2] == 0x41) live_open = 0;
+                    /* log only (no behaviour): the mainapp live session as seen on the bus. A viewer that leaves is closed
+                       by mainapp 12-13 s later (T38); these lines make that tail, and a 41 held back by the HA call, visible */
+                    if (gkb[2] == 0x40) {
+                        if (live_open) LOG("mainapp: live session 40 again while one is open (%ld s old, state %s)\n", (now_ms() - live_t0) / 1000, st_name[cstate]);
+                        else { live_t0 = now_ms(); LOG("mainapp: live session opened (40), state %s\n", st_name[cstate]); }
+                        live_open = 1;
+                    }
+                    if (gkb[2] == 0x41) {
+                        if (live_open) LOG("mainapp: live session closed (41) after %ld s%s, state %s\n", (now_ms() - live_t0) / 1000,
+                                           drop ? ", held back (HA call owns the bus)" : "", st_name[cstate]);
+                        else LOG("mainapp: 41 without a live session%s, state %s\n", drop ? " (held back)" : "", st_name[cstate]);
+                        live_open = 0;
+                    }
                     /* a 40 from mainapp (live view opened after Answer, or a viewer reconnecting) reaches the bus after our
                        43 01 and cuts the door->monitor audio; a new 43 01 brings it back (T41, door_peak test D1/D2) */
                     if (gkb[2] == 0x40 && remote_until && audio_on) rearm_at = now_ms() + 300;
